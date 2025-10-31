@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   kicad-checks:
-    runs-on: ubuntu-latest  # 使用Linux平台运行
+    runs-on: ubuntu-22.04   # 使用Linux平台运行
     
     steps:
       # 步骤1：检出代码仓库
@@ -254,15 +254,30 @@ jobs:
           name: kicad-outputs
           path: outputs/
       
-      # 步骤11：生成构建摘要文档
+      # 步骤11:生成构建摘要文档
       - name: Update README with status
         run: |
           buildDate=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
-          cacheStatus=${{ steps.cache-kicad.outputs.cache-hit == 'true' && 'Used cached installation' || 'Fresh installation' }}
+          
+          # KiCad缓存状态
+          if [ "${{ steps.cache-kicad.outputs.cache-hit }}" = "true" ]; then
+            cacheStatus="Used cached installation"
+          else
+            cacheStatus="Fresh installation"
+          fi
           
           # ERC/DRC状态
-          ercStatus=${{ steps.erc-check.outputs.status == 'passed' && 'Passed' || 'Failed' }}
-          drcStatus=${{ steps.drc-check.outputs.status == 'passed' && 'Passed' || 'Failed' }}
+          if [ "${{ steps.erc-check.outputs.status }}" = "passed" ]; then
+            ercStatus="Passed"
+          else
+            ercStatus="Failed"
+          fi
+          
+          if [ "${{ steps.drc-check.outputs.status }}" = "passed" ]; then
+            drcStatus="Passed"
+          else
+            drcStatus="Failed"
+          fi
           
           cat > outputs/build_summary.md << EOF
           ## Build Summary
