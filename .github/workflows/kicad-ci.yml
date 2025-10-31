@@ -1,0 +1,176 @@
+# KiCad项目自动化构建工作流
+# 功能：ERC/DRC检查、导出原理图PDF、BOM、Gerber文件和PCB图像
+name: KiCad CI/CD
+
+# 触发条件：推送到主分支或手动触发
+on:
+  push:
+    branches:
+      - main      # 主分支推送时触发
+      - master    # 或master分支推送时触发
+  workflow_dispatch:  # 允许在GitHub Actions页面手动触发
+
+jobs:
+  kicad-checks:
+    runs-on: ubuntu-latest  # 使用最新的Ubuntu运行器
+    
+    steps:
+      # 步骤1：检出代码仓库
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # 步骤2：安装KiCad 7.0及其库文件
+      - name: Setup KiCad environment
+        run: |
+          # 添加KiCad官方PPA源
+          sudo add-apt-repository --yes ppa:kicad/kicad-7.0-releases
+          sudo apt update
+          # 安装KiCad主程序和库文件
+          sudo apt install -y kicad kicad-libraries
+      
+      # 步骤3：运行ERC检查（电气规则检查）
+      # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
+      - name: Run ERC (Electrical Rules Check)
+        run: |
+          # 使用kicad-cli命令行工具执行ERC检查
+          kicad-cli sch erc \
+            --format json \
+            --output erc_report.json \
+            229_Test.kicad_sch
+          
+          # 检查报告文件是否生成并输出内容
+          if [ -f erc_report.json ]; then
+            echo "ERC check completed"
+            cat erc_report.json
+          fi
+      
+      # 步骤4：运行DRC检查（设计规则检查）
+      # 检查PCB设计中的布线错误，如间距不足、悬空走线等
+      - name: Run DRC (Design Rules Check)
+        run: |
+          # 使用kicad-cli命令行工具执行DRC检查
+          kicad-cli pcb drc \
+            --format json \
+            --output drc_report.json \
+            229_Test.kicad_pcb
+          
+          # 检查报告文件是否生成并输出内容
+          if [ -f drc_report.json ]; then
+            echo "DRC check completed"
+            cat drc_report.json
+          fi
+      
+      # 步骤5：导出原理图为PDF文档
+      - name: Export Schematic PDF
+        run: |
+          # 创建输出目录
+          mkdir -p outputs
+          # 将原理图导出为PDF格式，方便查看和打印
+          kicad-cli sch export pdf \
+            --output outputs/229_Test-Schematic.pdf \
+            229_Test.kicad_sch
+      
+      # 步骤6：导出BOM（物料清单）
+      - name: Export BOM
+        run: |
+          # 从原理图导出BOM清单（CSV格式），包含所有元件信息
+          kicad-cli sch export bom \
+            --output outputs/229_Test-BOM.csv \
+            229_Test.kicad_sch
+      
+      # 步骤7：生成Gerber制造文件
+      - name: Generate Gerber files
+        run: |
+          # 创建Gerber输出目录
+          mkdir -p outputs/gerber
+          # 导出所有Gerber层文件（用于PCB制造）
+          kicad-cli pcb export gerbers \
+            --output outputs/gerber/ \
+            229_Test.kicad_pcb
+          
+          # 生成钻孔文件（Excellon格式）
+          kicad-cli pcb export drill \
+            --format excellon \
+            --output outputs/gerber/ \
+            229_Test.kicad_pcb
+      
+      # 步骤8：导出PCB可视化图像
+      - name: Export PCB images
+        run: |
+          # 导出PCB正面视图（SVG格式）
+          # 包含正面铜层、阻焊层、丝印层和板框
+          kicad-cli pcb export svg \
+            --output outputs/229_Test-PCB-Front.svg \
+            --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts \
+            229_Test.kicad_pcb
+          
+          # 导出PCB背面视图（SVG格式）
+          # 包含背面铜层、阻焊层、丝印层和板框
+          kicad-cli pcb export svg \
+            --output outputs/229_Test-PCB-Back.svg \
+            --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts \
+            229_Test.kicad_pcb
+          
+          # 尝试导出3D STEP模型（如果可用）
+          # 失败时不中断工作流
+          kicad-cli pcb export step \
+            --output outputs/229_Test-3D.step \
+            229_Test.kicad_pcb || echo "3D export skipped"
+      
+      # 步骤9：打包Gerber文件为ZIP压缩包
+      - name: Create Gerber ZIP archive
+        run: |
+          cd outputs/gerber
+          # 将所有Gerber文件打包，方便下载和提交给PCB厂商
+          zip -r ../229_Test-Gerber.zip .
+          cd ../..
+      
+      # 步骤10：上传构建产物到GitHub Artifacts
+      # 可在Actions页面下载，保留90天
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kicad-outputs
+          path: outputs/
+      
+      # 步骤11：生成构建摘要文档
+      - name: Update README with status
+        run: |
+          # 创建包含构建信息的Markdown摘要文件
+          # 该文件将被用作Release的说明
+          cat > outputs/build_summary.md << 'EOF'
+          ## Build Summary
+          
+          - **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Commit**: ${{ github.sha }}
+          - **Branch**: ${{ github.ref_name }}
+          
+          ### Outputs
+          
+          - ✅ Schematic PDF
+          - ✅ BOM (Bill of Materials)
+          - ✅ Gerber files
+          - ✅ PCB Images (SVG)
+          
+          EOF
+      
+      # 步骤12：创建GitHub Release并上传所有文件
+      # 仅在推送到主分支时执行（手动触发时不创建Release）
+      - name: Create Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}          # 使用构建编号作为标签
+          name: Build ${{ github.run_number }}              # Release标题
+          body_path: outputs/build_summary.md               # Release说明内容
+          files: |                                           # 要上传的文件列表
+            outputs/229_Test-Schematic.pdf
+            outputs/229_Test-BOM.csv
+            outputs/229_Test-Gerber.zip
+            outputs/229_Test-PCB-Front.svg
+            outputs/229_Test-PCB-Back.svg
+            outputs/229_Test-3D.step
+            erc_report.json
+            drc_report.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}         # 使用GitHub提供的访问令牌

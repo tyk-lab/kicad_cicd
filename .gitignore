@@ -1,6 +1,41 @@
+# KiCad project files
+*.kicad_prl
+*-backups/
+*-cache.lib
+fp-info-cache
+*.bak
+*.bck
+*.bck-*
+
+# Temporary files
+*.tmp
+*~
+*.swp
+*.autosave
+*.auto_save
+
+# Output files (已有的输出可以保留在版本控制中)
+# 如果不想提交输出文件，取消下面的注释
 /*.zip
 /*.pdf
 /*.csv
 /GERBER
-/229_Test-backups
-/fp-info-cache
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# CI/CD Build artifacts
+outputs/
+erc_report.json
+drc_report.json
