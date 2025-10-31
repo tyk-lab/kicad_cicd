@@ -71,7 +71,17 @@ jobs:
           Write-Host "KiCad added to PATH: $kicadBin"
           Write-Host "Current PATH: $env:PATH"
         shell: powershell
-      
+
+       # 步骤4.6：安装额外依赖
+      - name: Install additional dependencies
+        run: |
+          Write-Host "Installing .NET Framework, OpenGL, Python..."
+          choco install dotnetfx -y
+          choco install opengl -y
+          choco install python -y
+          Write-Host "Additional dependencies installed"
+        shell: powershell
+
       # 步骤5：验证KiCad安装
       - name: Verify KiCad installation
         run: |
@@ -100,6 +110,19 @@ jobs:
             
             exit 1
           }
+        shell: powershell
+
+      # 步骤5.5：输出环境变量和DLLs
+      - name: Show environment and DLLs
+        run: |
+          Write-Host "PATH: $env:PATH"
+          $kicadBin = "C:\Program Files\KiCad\9.0\bin"
+          if (Test-Path $kicadBin) {
+            Write-Host "KiCad bin DLLs:"
+            Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
+          }
+          Write-Host "KiCad CLI version:"
+          & "$kicadBin\kicad-cli.exe" version
         shell: powershell
       
       # 步骤6：运行ERC检查（电气规则检查）
@@ -141,12 +164,24 @@ jobs:
             } elseif ($exitCode -eq -1073741819) {
               Write-Host "ERROR: KiCad crashed (Access Violation - missing dependencies)"
               Write-Host "This may indicate missing Visual C++ Runtime or other dependencies"
+
+              Write-Host "PATH: $env:PATH"
+              if (Test-Path $kicadBin) {
+                Write-Host "KiCad bin DLLs:"
+                Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
+              }
             } else {
               Write-Host "ERC check completed with exit code: $exitCode"
             }
           } catch {
             Write-Host "ERC check failed: $_"
             Write-Host $_.Exception.Message
+
+            Write-Host "PATH: $env:PATH"
+            if (Test-Path $kicadBin) {
+              Write-Host "KiCad bin DLLs:"
+              Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
+            }
           }
           
           # 检查报告文件是否生成并输出内容
