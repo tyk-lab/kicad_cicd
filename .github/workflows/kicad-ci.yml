@@ -69,10 +69,10 @@ jobs:
           Write-Host "Verifying installation..."
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
           if (Test-Path $kicadCli) {
-            Write-Host "✓ KiCad installed successfully"
+            Write-Host "KiCad installed successfully"
             & $kicadCli version
           } else {
-            Write-Host "✗ KiCad installation failed"
+            Write-Host "ERROR: KiCad installation failed"
             exit 1
           }
         shell: powershell
@@ -170,9 +170,9 @@ jobs:
           
           # 检查结果
           if ($exitCode -eq 0) {
-            Write-Host "✓ ERC check passed - no violations found"
+            Write-Host "ERC check passed - no violations found"
           } else {
-            Write-Host "⚠ ERC check found violations (exit code: $exitCode)"
+            Write-Host "WARNING: ERC check found violations (exit code: $exitCode)"
           }
           
           # 输出ERC报告内容
@@ -226,9 +226,9 @@ jobs:
           
           # 检查结果
           if ($exitCode -eq 0) {
-            Write-Host "✓ DRC check passed - no violations found"
+            Write-Host "DRC check passed - no violations found"
           } else {
-            Write-Host "⚠ DRC check found violations (exit code: $exitCode)"
+            Write-Host "WARNING: DRC check found violations (exit code: $exitCode)"
           }
           
           # 输出DRC报告内容
@@ -373,8 +373,8 @@ jobs:
           - ✅ BOM (Bill of Materials)
           - ✅ Gerber files
           - ✅ PCB Images (SVG)
-          - 📄 ERC Report (JSON)
-          - 📄 DRC Report (JSON)
+          - ERC Report (JSON)
+          - DRC Report (JSON)
           
           "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
         shell: powershell
