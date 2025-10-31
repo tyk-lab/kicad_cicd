@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   kicad-checks:
-    runs-on: windows-latest  # 使用Windows平台运行
+    runs-on: ubuntu-latest  # 使用Linux平台运行
     
     steps:
       # 步骤1：检出代码仓库
@@ -29,268 +29,108 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            C:\Program Files\KiCad\9.0
-            C:\ProgramData\chocolatey\lib\kicad
-          key: kicad-9.0.6-${{ runner.os }}-${{ hashFiles('.github/workflows/kicad-ci.yml') }}
+            /usr/bin/kicad-cli
+            /usr/share/kicad
+          key: kicad-latest-${{ runner.os }}
           restore-keys: |
-            kicad-9.0.6-${{ runner.os }}-
-            kicad-9.0.6-
+            kicad-latest-${{ runner.os }}
       
       # 步骤3：检查KiCad是否已缓存
       - name: Check KiCad from cache
         id: check-kicad
         run: |
-          Write-Host "Cache hit status: ${{ steps.cache-kicad.outputs.cache-hit }}"
-          Write-Host "Checking KiCad installation..."
+          echo "=========================================="
+          echo "Checking KiCad Cache Status"
+          echo "=========================================="
+          echo "Cache hit: ${{ steps.cache-kicad.outputs.cache-hit }}"
           
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          if (Test-Path $kicadCli) {
-            Write-Host "KiCad found at: $kicadCli"
-            & $kicadCli version
-            "cached=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            Write-Host "KiCad not found, will install"
-            "cached=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          }
-        shell: powershell
+          echo ""
+          echo "Checking installation files..."
+          
+          if command -v kicad-cli &> /dev/null; then
+            echo "✓ KiCad CLI found"
+            kicad-cli version
+            echo "cached=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ KiCad CLI NOT found"
+            echo "cached=false" >> $GITHUB_OUTPUT
+          fi
+          echo "=========================================="
+        shell: bash
       
       # 步骤4：安装KiCad（仅在缓存未命中时）
       - name: Setup KiCad environment
         if: steps.check-kicad.outputs.cached == 'false'
         run: |
-          Write-Host "========================================"
-          Write-Host "Installing KiCad and dependencies..."
-          Write-Host "========================================"
+          echo "========================================"
+          echo "Installing KiCad and dependencies..."
+          echo "========================================"
           
-          Write-Host "Installing Visual C++ Redistributable..."
-          choco install vcredist-all -y --no-progress
+          # 添加KiCad 9.0 PPA获取最新版本
+          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+          sudo apt-get update
           
-          Write-Host ""
-          Write-Host "Installing KiCad 9.0.6..."
-          choco install kicad --version=9.0.6 -y --no-progress
+          echo ""
+          echo "Installing KiCad 9.0 (latest version from PPA)..."
+          sudo apt-get install -y kicad kicad-libraries
           
-          Write-Host ""
-          Write-Host "Verifying installation..."
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          if (Test-Path $kicadCli) {
-            Write-Host "KiCad installed successfully"
-            & $kicadCli version
-          } else {
-            Write-Host "ERROR: KiCad installation failed"
+          echo ""
+          echo "Verifying installation..."
+          if command -v kicad-cli &> /dev/null; then
+            echo "KiCad installed successfully"
+            kicad-cli version
+          else
+            echo "ERROR: KiCad installation failed"
             exit 1
-          }
-        shell: powershell
+          fi
+        shell: bash
       
-      # 步骤4.5：配置环境变量
-      - name: Configure KiCad PATH
-        run: |
-          # 将KiCad bin目录添加到当前会话的PATH
-          $kicadBin = "C:\Program Files\KiCad\9.0\bin"
-          $env:PATH = "$kicadBin;$env:PATH"
-          
-          # 同时添加到后续步骤的PATH
-          echo "$kicadBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          
-          Write-Host "KiCad added to PATH: $kicadBin"
-          Write-Host "Current PATH: $env:PATH"
-        shell: powershell
-
-       # 步骤4.6：安装额外依赖
-      - name: Install additional dependencies
-        run: |
-          Write-Host "Installing .NET Framework, OpenGL, Python..."
-          choco install dotnetfx -y
-          choco install opengl -y
-          choco install python -y
-          Write-Host "Additional dependencies installed"
-        shell: powershell
-
-
       # 步骤6：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
       - name: Run ERC (Electrical Rules Check)
         id: erc-check
         continue-on-error: true
         run: |
-          Write-Host "=========================================="
-          Write-Host "Starting ERC check with detailed diagnostics"
-          Write-Host "=========================================="
+          echo "=========================================="
+          echo "Running ERC Check"
+          echo "=========================================="
           
-          # 1. 环境检查
-          Write-Host ""
-          Write-Host "[1] Environment Check"
-          Write-Host "Current Directory: $PWD"
-          Write-Host "User: $env:USERNAME"
-          Write-Host "Computer: $env:COMPUTERNAME"
-          Write-Host "OS: $env:OS"
-          Write-Host "Processor: $env:PROCESSOR_ARCHITECTURE"
+          schFile="229_Test.kicad_sch"
           
-          # 2. 检查文件
-          Write-Host ""
-          Write-Host "[2] File Check"
-          $schFile = "229_Test.kicad_sch"
-          if (-not (Test-Path $schFile)) {
-            Write-Host "ERROR: Schematic file not found: $schFile"
-            Write-Host "Available .kicad_sch files:"
-            Get-ChildItem -Filter "*.kicad_sch" | ForEach-Object { Write-Host "  - $($_.Name)" }
+          if [ ! -f "$schFile" ]; then
+            echo "ERROR: Schematic file not found: $schFile"
+            ls -la *.kicad_sch
             exit 1
-          }
-          $fileInfo = Get-Item $schFile
-          Write-Host "Found schematic file: $schFile"
-          Write-Host "  Size: $($fileInfo.Length) bytes"
-          Write-Host "  Last Modified: $($fileInfo.LastWriteTime)"
-          Write-Host "  Full Path: $($fileInfo.FullName)"
+          fi
           
-          # 3. KiCad安装检查
-          Write-Host ""
-          Write-Host "[3] KiCad Installation Check"
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          if (-not (Test-Path $kicadCli)) {
-            Write-Host "ERROR: kicad-cli.exe not found at: $kicadCli"
-            exit 1
-          }
-          $cliInfo = Get-Item $kicadCli
-          Write-Host "Found kicad-cli.exe:"
-          Write-Host "  Path: $($cliInfo.FullName)"
-          Write-Host "  Size: $($cliInfo.Length) bytes"
-          Write-Host "  Version: $($cliInfo.VersionInfo.FileVersion)"
+          echo "Found schematic file: $schFile"
+          echo "Running ERC check..."
           
-          # 4. 检查KiCad版本
-          Write-Host ""
-          Write-Host "[4] KiCad Version Check"
-          try {
-            & $kicadCli version 2>&1 | Write-Host
-          } catch {
-            Write-Host "ERROR: Failed to get KiCad version: $_"
-          }
+          # 运行ERC检查
+          kicad-cli sch erc --exit-code-violations --severity-all --format json --output erc_report.json "$schFile" || true
+          exitCode=$?
           
-          # 5. 检查依赖项
-          Write-Host ""
-          Write-Host "[5] Dependencies Check"
-          $dependencies = @(
-            "C:\Windows\System32\vcruntime140.dll",
-            "C:\Windows\System32\msvcp140.dll",
-            "C:\Windows\System32\vcruntime140_1.dll"
-          )
-          foreach ($dll in $dependencies) {
-            if (Test-Path $dll) {
-              Write-Host "  OK: $dll"
-            } else {
-              Write-Host "  MISSING: $dll"
-            }
-          }
-          
-          # 6. 检查显示相关环境变量
-          Write-Host ""
-          Write-Host "[6] Display Environment Variables"
-          Write-Host "  DISPLAY: $env:DISPLAY"
-          Write-Host "  LIBGL_ALWAYS_INDIRECT: $env:LIBGL_ALWAYS_INDIRECT"
-          Write-Host "  QT_QPA_PLATFORM: $env:QT_QPA_PLATFORM"
-          
-          # 7. 尝试列出可用命令
-          Write-Host ""
-          Write-Host "[7] KiCad CLI Available Commands"
-          try {
-            & $kicadCli --help 2>&1 | Select-Object -First 30 | Write-Host
-          } catch {
-            Write-Host "ERROR: Failed to get help: $_"
-          }
-          
-          # 8. 检查ERC命令帮助
-          Write-Host ""
-          Write-Host "[8] ERC Command Help"
-          try {
-            & $kicadCli sch erc --help 2>&1 | Write-Host
-          } catch {
-            Write-Host "ERROR: Failed to get ERC help: $_"
-          }
-          
-          # 9. 准备运行ERC
-          Write-Host ""
-          Write-Host "[9] Preparing to Run ERC"
-          Write-Host "Command: kicad-cli sch erc --exit-code-violations --severity-all --format json --output erc_report.json $schFile"
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "EXECUTING ERC CHECK NOW..."
-          Write-Host "=========================================="
-          
-          # 10. 运行ERC检查并捕获所有输出
-          $ErrorActionPreference = 'Continue'
-          $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-          
-          try {
-            & $kicadCli sch erc --exit-code-violations --severity-all --format json --output erc_report.json $schFile 2>&1 | Tee-Object -Variable ercOutput | Write-Host
-            $exitCode = $LASTEXITCODE
-            $stopwatch.Stop()
+          # 检查结果
+          if [ -f "erc_report.json" ]; then
+            echo "ERC report generated successfully"
+            cat erc_report.json
             
-            Write-Host ""
-            Write-Host "=========================================="
-            Write-Host "ERC EXECUTION COMPLETED"
-            Write-Host "=========================================="
-            Write-Host "Exit Code: $exitCode (0x$([Convert]::ToString($exitCode, 16)))"
-            Write-Host "Execution Time: $($stopwatch.Elapsed.TotalSeconds) seconds"
-            
-          } catch {
-            $stopwatch.Stop()
-            Write-Host ""
-            Write-Host "=========================================="
-            Write-Host "ERC EXECUTION FAILED WITH EXCEPTION"
-            Write-Host "=========================================="
-            Write-Host "Exception Type: $($_.Exception.GetType().FullName)"
-            Write-Host "Exception Message: $($_.Exception.Message)"
-            Write-Host "Stack Trace:"
-            Write-Host $_.Exception.StackTrace
-            Write-Host "Exit Code: $LASTEXITCODE (0x$([Convert]::ToString($LASTEXITCODE, 16)))"
-            Write-Host "Execution Time: $($stopwatch.Elapsed.TotalSeconds) seconds"
-            $exitCode = $LASTEXITCODE
-          }
+            if [ $exitCode -eq 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "violations=0" >> $GITHUB_OUTPUT
+            else
+              echo "WARNING: ERC check found violations (exit code: $exitCode)"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "violations=1" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ERROR: ERC report was not generated"
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "violations=unknown" >> $GITHUB_OUTPUT
+          fi
           
-          # 11. 检查输出文件
-          Write-Host ""
-          Write-Host "[11] Output File Check"
-          if (Test-Path erc_report.json) {
-            $reportInfo = Get-Item erc_report.json
-            Write-Host "ERC report generated successfully:"
-            Write-Host "  Path: $($reportInfo.FullName)"
-            Write-Host "  Size: $($reportInfo.Length) bytes"
-            Write-Host ""
-            Write-Host "Report Content:"
-            Write-Host "==========================================="
-            Get-Content erc_report.json | Write-Host
-            Write-Host "==========================================="
-          } else {
-            Write-Host "ERROR: ERC report file was NOT generated"
-            Write-Host "Checking current directory contents:"
-            Get-ChildItem | ForEach-Object { Write-Host "  - $($_.Name)" }
-          }
-          
-          # 12. 最终状态
-          Write-Host ""
-          Write-Host "[12] Final Status"
-          if ($exitCode -eq 0) {
-            Write-Host "STATUS: ERC check PASSED - no violations found"
-            "status=passed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "violations=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } elseif ($exitCode -eq -1073741819) {
-            Write-Host "STATUS: ERC check CRASHED with access violation (0xC0000005)"
-            Write-Host "This typically indicates:"
-            Write-Host "  - Missing DLL dependencies"
-            Write-Host "  - Display/GUI initialization failure"
-            Write-Host "  - OpenGL/graphics driver issues"
-            Write-Host "  - Memory access violation"
-            "status=crashed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "violations=unknown" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            Write-Host "STATUS: ERC check FAILED with exit code $exitCode"
-            "status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "violations=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          }
-          
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "ERC DIAGNOSTIC COMPLETE"
-          Write-Host "=========================================="
-        shell: powershell
+          echo "=========================================="
+        shell: bash
       
       # 步骤7：运行DRC检查（设计规则检查）
       # 检查PCB设计中的布线错误，如间距不足、悬空走线等
@@ -298,133 +138,113 @@ jobs:
         id: drc-check
         continue-on-error: true
         run: |
-          Write-Host "Starting DRC check..."
+          echo "=========================================="
+          echo "Running DRC Check"
+          echo "=========================================="
           
-          $pcbFile = "229_Test.kicad_pcb"
-          if (-not (Test-Path $pcbFile)) {
-            Write-Host "PCB file not found: $pcbFile"
-            Get-ChildItem -Filter "*.kicad_pcb"
+          pcbFile="229_Test.kicad_pcb"
+          
+          if [ ! -f "$pcbFile" ]; then
+            echo "ERROR: PCB file not found: $pcbFile"
+            ls -la *.kicad_pcb
             exit 1
-          }
-          Write-Host "Found PCB file: $pcbFile"
+          fi
           
-          # 使用kicad-cli运行DRC，输出JSON报告
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          Write-Host "Running: kicad-cli pcb drc --exit-code-violations"
+          echo "Found PCB file: $pcbFile"
+          echo "Running DRC check..."
           
-          # 运行DRC检查，使用--exit-code-violations让有违规时返回非0退出码
-          & $kicadCli pcb drc --exit-code-violations --format json --output drc_report.json $pcbFile
-          $exitCode = $LASTEXITCODE
+          # 运行DRC检查
+          kicad-cli pcb drc --exit-code-violations --severity-all --format json --output drc_report.json "$pcbFile" || true
+          exitCode=$?
           
           # 检查结果
-          if ($exitCode -eq 0) {
-            Write-Host "DRC check passed - no violations found"
-          } else {
-            Write-Host "WARNING: DRC check found violations (exit code: $exitCode)"
-          }
+          if [ -f "drc_report.json" ]; then
+            echo "DRC report generated successfully"
+            cat drc_report.json
+            
+            if [ $exitCode -eq 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "violations=0" >> $GITHUB_OUTPUT
+            else
+              echo "WARNING: DRC check found violations (exit code: $exitCode)"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "violations=1" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ERROR: DRC report was not generated"
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "violations=unknown" >> $GITHUB_OUTPUT
+          fi
           
-          # 输出DRC报告内容
-          if (Test-Path drc_report.json) {
-            Write-Host ""
-            Write-Host "DRC Report:"
-            Write-Host "==========================================="
-            Get-Content drc_report.json | Write-Host
-            Write-Host "==========================================="
-          } else {
-            Write-Host "ERROR: DRC report file was not generated"
-            exit 1
-          }
-          
-          # 保存DRC结果状态
-          if ($exitCode -eq 0) {
-            "status=passed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "violations=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            Write-Host ""
-            Write-Host "DRC check found violations (will continue CI)"
-            "status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "violations=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            exit $exitCode
-          }
-        shell: powershell
+          echo "=========================================="
+        shell: bash
       
       # 步骤8：导出原理图为PDF文档
       - name: Export Schematic PDF
         run: |
-          Write-Host "Exporting schematic to PDF..."
-          # 创建输出目录
-          New-Item -ItemType Directory -Force -Path outputs
-          # 将原理图导出为PDF格式，方便查看和打印
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          & $kicadCli sch export pdf --output outputs/229_Test-Schematic.pdf 229_Test.kicad_sch
-          Write-Host "Schematic PDF exported"
-        shell: powershell
+          echo "Exporting schematic to PDF..."
+          mkdir -p outputs
+          kicad-cli sch export pdf --output outputs/229_Test-Schematic.pdf 229_Test.kicad_sch
+          echo "Schematic PDF exported"
+        shell: bash
       
       # 步骤6：导出BOM（物料清单）
       - name: Export BOM
         run: |
-          Write-Host "Exporting BOM..."
-          # 从原理图导出BOM清单（CSV格式），包含所有元件信息
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          & $kicadCli sch export bom --output outputs/229_Test-BOM.csv 229_Test.kicad_sch
-          Write-Host "BOM exported"
-        shell: powershell
+          echo "Exporting BOM..."
+          kicad-cli sch export bom --output outputs/229_Test-BOM.csv 229_Test.kicad_sch
+          echo "BOM exported"
+        shell: bash
       
       # 步骤7：生成Gerber制造文件
       - name: Generate Gerber files
         run: |
-          Write-Host "Generating Gerber files..."
-          # 创建Gerber输出目录
-          New-Item -ItemType Directory -Force -Path outputs/gerber
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
+          echo "Generating Gerber files..."
+          mkdir -p outputs/gerber
           
           # 导出所有Gerber层文件（用于PCB制造）
-          & $kicadCli pcb export gerbers --output outputs/gerber/ 229_Test.kicad_pcb
-          Write-Host "Gerber layers exported"
+          kicad-cli pcb export gerbers --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "Gerber layers exported"
           
-          # 生成钻孔文件（Excellon格式）
-          & $kicadCli pcb export drill --format excellon --output outputs/gerber/ 229_Test.kicad_pcb
-          Write-Host "Drill files generated"
-        shell: powershell
+          # 生成钆孔文件（Excellon格式）
+          kicad-cli pcb export drill --format excellon --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "Drill files generated"
+        shell: bash
       
       # 步骤8：导出PCB可视化图像
       - name: Export PCB images
         run: |
-          Write-Host "Exporting PCB images..."
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          
-          $ErrorActionPreference = 'Continue'
+          echo "Exporting PCB images..."
           
           # 导出PCB正面视图（SVG格式）
-          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path "outputs/229_Test-PCB-Front.svg") {
-            Write-Host "Front PCB image exported successfully"
-          }
+          kicad-cli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-PCB-Front.svg" ]; then
+            echo "Front PCB image exported successfully"
+          fi
           
           # 导出PCB背面视图（SVG格式）
-          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path "outputs/229_Test-PCB-Back.svg") {
-            Write-Host "Back PCB image exported successfully"
-          }
+          kicad-cli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-PCB-Back.svg" ]; then
+            echo "Back PCB image exported successfully"
+          fi
           
           # 导出3D STEP模型
-          & $kicadCli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path "outputs/229_Test-3D.step") {
-            Write-Host "3D STEP model exported successfully"
-          } else {
-            Write-Host "3D export skipped (may require 3D models)"
-          }
+          kicad-cli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-3D.step" ]; then
+            echo "3D STEP model exported successfully"
+          else
+            echo "3D export skipped (may require 3D models)"
+          fi
           
-          Write-Host "PCB image export completed"
-          exit 0
-        shell: powershell
+          echo "PCB image export completed"
+        shell: bash
       
       # 步骤9：打包Gerber文件为ZIP压缩包
       - name: Create Gerber ZIP archive
         run: |
           # 将所有Gerber文件打包，方便下载和提交给PCB厂商
-          Compress-Archive -Path outputs/gerber/* -DestinationPath outputs/229_Test-Gerber.zip -Force
-        shell: powershell
+          cd outputs && zip -r 229_Test-Gerber.zip gerber/
+        shell: bash
       
       # 步骤10：上传构建产物到GitHub Artifacts
       # 可在Actions页面下载，保留90天
@@ -437,16 +257,14 @@ jobs:
       # 步骤11：生成构建摘要文档
       - name: Update README with status
         run: |
-          # 创建包含构建信息的Markdown摘要文件
-          # 该文件将被用作Release的说明
-          $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
-          $cacheStatus = if ('${{ steps.cache-kicad.outputs.cache-hit }}' -eq 'true') { 'Used cached installation' } else { 'Fresh installation' }
+          buildDate=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          cacheStatus=${{ steps.cache-kicad.outputs.cache-hit == 'true' && 'Used cached installation' || 'Fresh installation' }}
           
           # ERC/DRC状态
-          $ercStatus = if ('${{ steps.erc-check.outputs.status }}' -eq 'passed') { '✅ Passed' } else { '❌ Failed' }
-          $drcStatus = if ('${{ steps.drc-check.outputs.status }}' -eq 'passed') { '✅ Passed' } else { '❌ Failed' }
+          ercStatus=${{ steps.erc-check.outputs.status == 'passed' && 'Passed' || 'Failed' }}
+          drcStatus=${{ steps.drc-check.outputs.status == 'passed' && 'Passed' || 'Failed' }}
           
-          @"
+          cat > outputs/build_summary.md << EOF
           ## Build Summary
           
           - **Build Date**: $buildDate
@@ -461,65 +279,60 @@ jobs:
           
           ### Outputs
           
-          - ✅ Schematic PDF
-          - ✅ BOM (Bill of Materials)
-          - ✅ Gerber files
-          - ✅ PCB Images (SVG)
+          - Schematic PDF
+          - BOM (Bill of Materials)
+          - Gerber files
+          - PCB Images (SVG)
           - ERC Report (JSON)
           - DRC Report (JSON)
-          
-          "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
-        shell: powershell
+          EOF
+        shell: bash
       
       # 步骤12：准备Release文件（只包含成功生成的文件，精简输出）
       - name: Prepare release files
         run: |
-          Write-Host "Preparing release files..."
-          New-Item -ItemType Directory -Force -Path release
+          echo "Preparing release files..."
+          mkdir -p release
           
           # 只复制关键文件,不包含散乱的Gerber文件
-          $filesToCopy = @(
-            "outputs/229_Test-Schematic.pdf",
-            "outputs/229_Test-BOM.csv",
-            "outputs/229_Test-Gerber.zip",
-            "outputs/229_Test-PCB-Front.svg",
-            "outputs/229_Test-PCB-Back.svg",
-            "outputs/229_Test-3D.step"
-          )
+          files="
+            outputs/229_Test-Schematic.pdf
+            outputs/229_Test-BOM.csv
+            outputs/229_Test-Gerber.zip
+            outputs/229_Test-PCB-Front.svg
+            outputs/229_Test-PCB-Back.svg
+            outputs/229_Test-3D.step
+          "
           
-          Write-Host "Copying key output files:"
-          foreach ($file in $filesToCopy) {
-            if (Test-Path $file) {
-              $fileName = Split-Path $file -Leaf
-              Copy-Item $file "release/$fileName"
-              Write-Host "  ✓ $fileName"
-            } else {
-              Write-Host "  ✗ $fileName (not found)"
-            }
-          }
+          echo "Copying key output files:"
+          for file in $files; do
+            if [ -f "$file" ]; then
+              cp "$file" release/
+              echo "  + $(basename $file)"
+            else
+              echo "  - $(basename $file) (not found)"
+            fi
+          done
           
           # 如果ERC/DRC报告存在，也复制它们
-          if (Test-Path erc_report.json) {
-            Copy-Item erc_report.json release/
-            Write-Host "  ✓ erc_report.json"
-          } else {
-            Write-Host "  ✗ erc_report.json (check crashed)"
-          }
+          if [ -f "erc_report.json" ]; then
+            cp erc_report.json release/
+            echo "  + erc_report.json"
+          else
+            echo "  - erc_report.json (not available)"
+          fi
           
-          if (Test-Path drc_report.json) {
-            Copy-Item drc_report.json release/
-            Write-Host "  ✓ drc_report.json"
-          } else {
-            Write-Host "  ✗ drc_report.json (check crashed)"
-          }
+          if [ -f "drc_report.json" ]; then
+            cp drc_report.json release/
+            echo "  + drc_report.json"
+          else
+            echo "  - drc_report.json (not available)"
+          fi
           
-          Write-Host ""
-          Write-Host "Final release files:"
-          Get-ChildItem -Path release | ForEach-Object { 
-            $sizeKB = [math]::Round($_.Length/1024, 2)
-            Write-Host "  - $($_.Name) ($sizeKB KB)" 
-          }
-        shell: powershell
+          echo ""
+          echo "Final release files:"
+          ls -lh release/ | tail -n +2 | awk '{print "  -", $9, "(" $5 ")"}'
+        shell: bash
       
       # 步骤13：创建GitHub Release并上传所有文件
       # 仅在推送到主分支时执行（手动触发时不创建Release）
@@ -539,80 +352,64 @@ jobs:
       - name: Display CI/CD Results
         if: always()
         run: |
-          Write-Host ""
-          Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "  KiCad CI/CD Results" -ForegroundColor Cyan
-          Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host ""
+          echo ""
+          echo "=========================================="
+          echo "  KiCad CI/CD Results"
+          echo "=========================================="
+          echo ""
           
           # 构建信息
-          Write-Host "[BUILD INFO]" -ForegroundColor Yellow
-          Write-Host "  Build Number: ${{ github.run_number }}"
-          Write-Host "  Commit SHA: ${{ github.sha }}"
-          Write-Host "  Branch: ${{ github.ref_name }}"
-          Write-Host "  Trigger: ${{ github.event_name }}"
-          Write-Host ""
+          echo "[BUILD INFO]"
+          echo "  Build Number: ${{ github.run_number }}"
+          echo "  Commit SHA: ${{ github.sha }}"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  Trigger: ${{ github.event_name }}"
+          echo ""
           
           # 质量检查结果
-          Write-Host "[QUALITY CHECKS]" -ForegroundColor Yellow
-          $ercStatus = "${{ steps.erc-check.outputs.status }}"
-          $drcStatus = "${{ steps.drc-check.outputs.status }}"
+          echo "[QUALITY CHECKS]"
+          ercStatus="${{ steps.erc-check.outputs.status }}"
+          drcStatus="${{ steps.drc-check.outputs.status }}"
           
-          if ($ercStatus -eq "passed") {
-            Write-Host "  ERC Check: PASSED" -ForegroundColor Green
-          } elseif ($ercStatus -eq "crashed") {
-            Write-Host "  ERC Check: CRASHED (CI environment limitation)" -ForegroundColor Yellow
-          } elseif ($ercStatus -eq "failed") {
-            Write-Host "  ERC Check: FAILED (violations found)" -ForegroundColor Red
-          } else {
-            Write-Host "  ERC Check: SKIPPED" -ForegroundColor Gray
-          }
+          case "$ercStatus" in
+            "passed") echo "  ERC Check: PASSED" ;;
+            "failed") echo "  ERC Check: FAILED (violations found)" ;;
+            "error") echo "  ERC Check: ERROR" ;;
+            *) echo "  ERC Check: SKIPPED" ;;
+          esac
           
-          if ($drcStatus -eq "passed") {
-            Write-Host "  DRC Check: PASSED" -ForegroundColor Green
-          } elseif ($drcStatus -eq "crashed") {
-            Write-Host "  DRC Check: CRASHED (CI environment limitation)" -ForegroundColor Yellow
-          } elseif ($drcStatus -eq "failed") {
-            Write-Host "  DRC Check: FAILED (violations found)" -ForegroundColor Red
-          } else {
-            Write-Host "  DRC Check: SKIPPED" -ForegroundColor Gray
-          }
-          Write-Host ""
+          case "$drcStatus" in
+            "passed") echo "  DRC Check: PASSED" ;;
+            "failed") echo "  DRC Check: FAILED (violations found)" ;;
+            "error") echo "  DRC Check: ERROR" ;;
+            *) echo "  DRC Check: SKIPPED" ;;
+          esac
+          echo ""
           
           # 输出文件
-          Write-Host "[GENERATED FILES]" -ForegroundColor Yellow
-          if (Test-Path "outputs/229_Test-Schematic.pdf") {
-            Write-Host "  + Schematic PDF"
-          }
-          if (Test-Path "outputs/229_Test-BOM.csv") {
-            Write-Host "  + BOM (Bill of Materials)"
-          }
-          if (Test-Path "outputs/229_Test-Gerber.zip") {
-            $size = [math]::Round((Get-Item "outputs/229_Test-Gerber.zip").Length / 1024, 2)
-            Write-Host "  + Gerber files ($size KB)"
-          }
-          if (Test-Path "outputs/229_Test-PCB-Front.svg") {
-            Write-Host "  + PCB Front Image"
-          }
-          if (Test-Path "outputs/229_Test-PCB-Back.svg") {
-            Write-Host "  + PCB Back Image"
-          }
-          if (Test-Path "outputs/229_Test-3D.step") {
-            Write-Host "  + 3D STEP Model"
-          }
-          Write-Host ""
+          echo "[GENERATED FILES]"
+          [ -f "outputs/229_Test-Schematic.pdf" ] && echo "  + Schematic PDF"
+          [ -f "outputs/229_Test-BOM.csv" ] && echo "  + BOM (Bill of Materials)"
+          if [ -f "outputs/229_Test-Gerber.zip" ]; then
+            size=$(du -h "outputs/229_Test-Gerber.zip" | cut -f1)
+            echo "  + Gerber files ($size)"
+          fi
+          [ -f "outputs/229_Test-PCB-Front.svg" ] && echo "  + PCB Front Image"
+          [ -f "outputs/229_Test-PCB-Back.svg" ] && echo "  + PCB Back Image"
+          [ -f "outputs/229_Test-3D.step" ] && echo "  + 3D STEP Model"
+          echo ""
           
           # Release信息
-          if ("${{ github.event_name }}" -eq "push" -and ("${{ github.ref }}" -eq "refs/heads/main" -or "${{ github.ref }}" -eq "refs/heads/master")) {
-            Write-Host "[RELEASE]" -ForegroundColor Yellow
-            Write-Host "  Tag: build-${{ github.run_number }}"
-            Write-Host "  URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
-          } else {
-            Write-Host "[INFO] Manual trigger - no release created" -ForegroundColor Gray
-          }
+          if [ "${{ github.event_name }}" = "push" ] && ([ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]); then
+            echo "[RELEASE]"
+            echo "  Tag: build-${{ github.run_number }}"
+            echo "  URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
+          else
+            echo "[INFO] Manual trigger - no release created"
+          fi
           
-          Write-Host ""
-          Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "  CI/CD Workflow Completed" -ForegroundColor Cyan
-          Write-Host "==========================================" -ForegroundColor Cyan
-        shell: powershell
+          echo ""
+          echo "=========================================="
+          echo "  CI/CD Workflow Completed"
+          echo "=========================================="
+        shell: bash
