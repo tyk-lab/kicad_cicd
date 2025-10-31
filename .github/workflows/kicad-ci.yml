@@ -208,7 +208,7 @@ jobs:
           # 9. 准备运行ERC
           Write-Host ""
           Write-Host "[9] Preparing to Run ERC"
-          Write-Host "Command: kicad-cli sch erc --exit-code-violations --format json --output erc_report.json $schFile --verbose"
+          Write-Host "Command: kicad-cli sch erc --exit-code-violations --severity-all --format json --output erc_report.json $schFile"
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "EXECUTING ERC CHECK NOW..."
@@ -219,7 +219,7 @@ jobs:
           $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
           
           try {
-            & $kicadCli sch erc --exit-code-violations --format json --output erc_report.json $schFile --verbose 2>&1 | Tee-Object -Variable ercOutput | Write-Host
+            & $kicadCli sch erc --exit-code-violations --severity-all --format json --output erc_report.json $schFile 2>&1 | Tee-Object -Variable ercOutput | Write-Host
             $exitCode = $LASTEXITCODE
             $stopwatch.Stop()
             
@@ -471,32 +471,51 @@ jobs:
           "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
         shell: powershell
       
-      # 步骤12：准备Release文件（只包含成功生成的文件）
+      # 步骤12：准备Release文件（只包含成功生成的文件，精简输出）
       - name: Prepare release files
         run: |
-          Write-Host "Copying release files..."
+          Write-Host "Preparing release files..."
           New-Item -ItemType Directory -Force -Path release
           
-          # 复制outputs目录下的所有文件
-          Copy-Item -Path outputs/* -Destination release/ -Recurse -Force
+          # 只复制关键文件,不包含散乱的Gerber文件
+          $filesToCopy = @(
+            "outputs/229_Test-Schematic.pdf",
+            "outputs/229_Test-BOM.csv",
+            "outputs/229_Test-Gerber.zip",
+            "outputs/229_Test-PCB-Front.svg",
+            "outputs/229_Test-PCB-Back.svg",
+            "outputs/229_Test-3D.step"
+          )
+          
+          Write-Host "Copying key output files:"
+          foreach ($file in $filesToCopy) {
+            if (Test-Path $file) {
+              $fileName = Split-Path $file -Leaf
+              Copy-Item $file "release/$fileName"
+              Write-Host "  ✓ $fileName"
+            } else {
+              Write-Host "  ✗ $fileName (not found)"
+            }
+          }
           
           # 如果ERC/DRC报告存在，也复制它们
           if (Test-Path erc_report.json) {
             Copy-Item erc_report.json release/
-            Write-Host "ERC report included"
+            Write-Host "  ✓ erc_report.json"
           } else {
-            Write-Host "ERC report not available (check crashed)"
+            Write-Host "  ✗ erc_report.json (check crashed)"
           }
           
           if (Test-Path drc_report.json) {
             Copy-Item drc_report.json release/
-            Write-Host "DRC report included"
+            Write-Host "  ✓ drc_report.json"
           } else {
-            Write-Host "DRC report not available (check crashed)"
+            Write-Host "  ✗ drc_report.json (check crashed)"
           }
           
-          Write-Host "Release files prepared:"
-          Get-ChildItem -Path release -Recurse | ForEach-Object { Write-Host "  - $($_.FullName)" }
+          Write-Host ""
+          Write-Host "Final release files:"
+          Get-ChildItem -Path release | ForEach-Object { Write-Host "  - $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
         shell: powershell
       
       # 步骤13：创建GitHub Release并上传所有文件
@@ -512,3 +531,85 @@ jobs:
           fail_on_unmatched_files: false                    # 文件不存在时不报错
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}         # 使用GitHub提供的访问令牌
+      
+      # 步骤14：输出CI/CD执行结果摘要
+      - name: Display CI/CD Results
+        if: always()
+        run: |
+          Write-Host ""
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host "  KiCad CI/CD 执行结果" -ForegroundColor Cyan
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host ""
+          
+          # 构建信息
+          Write-Host "📋 构建信息:" -ForegroundColor Yellow
+          Write-Host "  • 构建编号: ${{ github.run_number }}"
+          Write-Host "  • 提交SHA: ${{ github.sha }}"
+          Write-Host "  • 分支: ${{ github.ref_name }}"
+          Write-Host "  • 触发方式: ${{ github.event_name }}"
+          Write-Host ""
+          
+          # 质量检查结果
+          Write-Host "🔍 质量检查:" -ForegroundColor Yellow
+          $ercStatus = "${{ steps.erc-check.outputs.status }}"
+          $drcStatus = "${{ steps.drc-check.outputs.status }}"
+          
+          if ($ercStatus -eq "passed") {
+            Write-Host "  • ERC检查: ✅ 通过" -ForegroundColor Green
+          } elseif ($ercStatus -eq "crashed") {
+            Write-Host "  • ERC检查: ⚠️ 崩溃 (CI环境限制)" -ForegroundColor Yellow
+          } elseif ($ercStatus -eq "failed") {
+            Write-Host "  • ERC检查: ❌ 发现违规" -ForegroundColor Red
+          } else {
+            Write-Host "  • ERC检查: ⏭️ 跳过" -ForegroundColor Gray
+          }
+          
+          if ($drcStatus -eq "passed") {
+            Write-Host "  • DRC检查: ✅ 通过" -ForegroundColor Green
+          } elseif ($drcStatus -eq "crashed") {
+            Write-Host "  • DRC检查: ⚠️ 崩溃 (CI环境限制)" -ForegroundColor Yellow
+          } elseif ($drcStatus -eq "failed") {
+            Write-Host "  • DRC检查: ❌ 发现违规" -ForegroundColor Red
+          } else {
+            Write-Host "  • DRC检查: ⏭️ 跳过" -ForegroundColor Gray
+          }
+          Write-Host ""
+          
+          # 输出文件
+          Write-Host "📦 生成文件:" -ForegroundColor Yellow
+          if (Test-Path "outputs/229_Test-Schematic.pdf") {
+            Write-Host "  • ✅ 原理图PDF"
+          }
+          if (Test-Path "outputs/229_Test-BOM.csv") {
+            Write-Host "  • ✅ BOM物料清单"
+          }
+          if (Test-Path "outputs/229_Test-Gerber.zip") {
+            $size = [math]::Round((Get-Item "outputs/229_Test-Gerber.zip").Length / 1KB, 2)
+            Write-Host "  • ✅ Gerber制造文件 ($size KB)"
+          }
+          if (Test-Path "outputs/229_Test-PCB-Front.svg") {
+            Write-Host "  • ✅ PCB正面图像"
+          }
+          if (Test-Path "outputs/229_Test-PCB-Back.svg") {
+            Write-Host "  • ✅ PCB背面图像"
+          }
+          if (Test-Path "outputs/229_Test-3D.step") {
+            Write-Host "  • ✅ 3D STEP模型"
+          }
+          Write-Host ""
+          
+          # Release信息
+          if ("${{ github.event_name }}" -eq "push" -and ("${{ github.ref }}" -eq "refs/heads/main" -or "${{ github.ref }}" -eq "refs/heads/master")) {
+            Write-Host "🚀 Release:" -ForegroundColor Yellow
+            Write-Host "  • 标签: build-${{ github.run_number }}"
+            Write-Host "  • 查看: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
+          } else {
+            Write-Host "ℹ️  手动触发构建，未创建Release" -ForegroundColor Gray
+          }
+          
+          Write-Host ""
+          Write-Host "==========================================" -ForegroundColor Cyan
+          Write-Host "  ✨ CI/CD 流程完成" -ForegroundColor Cyan
+          Write-Host "==========================================" -ForegroundColor Cyan
+        shell: powershell
