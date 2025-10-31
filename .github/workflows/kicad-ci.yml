@@ -12,119 +12,128 @@ on:
 
 jobs:
   kicad-checks:
-    runs-on: ubuntu-22.04  # 使用Ubuntu 22.04 (Jammy) 避免依赖冲突
+    runs-on: windows-latest  # 使用Windows平台运行
     
     steps:
       # 步骤1：检出代码仓库
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # 步骤2：安装KiCad 7.0及其库文件
+      # 步骤2：安装KiCad最新版本及其库文件
       - name: Setup KiCad environment
         run: |
-          # 添加KiCad官方PPA源
-          sudo add-apt-repository --yes ppa:kicad/kicad-7.0-releases
-          sudo apt update
-          # 安装KiCad主程序和库文件
-          # 使用 --fix-broken 和 --no-install-recommends 避免依赖问题
-          sudo apt install -y --fix-broken --no-install-recommends kicad kicad-libraries
+          # 使用Chocolatey安装KiCad最新版本 9.0.6
+          choco install kicad --version=9.0.6 -y
+          
+          # 将KiCad添加到PATH环境变量
+          echo "C:\Program Files\KiCad\9.0\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: powershell
       
       # 步骤3：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
       - name: Run ERC (Electrical Rules Check)
         run: |
           # 使用kicad-cli命令行工具执行ERC检查
-          kicad-cli sch erc \
-            --format json \
-            --output erc_report.json \
+          kicad-cli sch erc `
+            --format json `
+            --output erc_report.json `
             229_Test.kicad_sch
           
           # 检查报告文件是否生成并输出内容
-          if [ -f erc_report.json ]; then
-            echo "ERC check completed"
-            cat erc_report.json
-          fi
+          if (Test-Path erc_report.json) {
+            Write-Host "ERC check completed"
+            Get-Content erc_report.json
+          }
+        shell: powershell
       
       # 步骤4：运行DRC检查（设计规则检查）
       # 检查PCB设计中的布线错误，如间距不足、悬空走线等
       - name: Run DRC (Design Rules Check)
         run: |
           # 使用kicad-cli命令行工具执行DRC检查
-          kicad-cli pcb drc \
-            --format json \
-            --output drc_report.json \
+          kicad-cli pcb drc `
+            --format json `
+            --output drc_report.json `
             229_Test.kicad_pcb
           
           # 检查报告文件是否生成并输出内容
-          if [ -f drc_report.json ]; then
-            echo "DRC check completed"
-            cat drc_report.json
-          fi
+          if (Test-Path drc_report.json) {
+            Write-Host "DRC check completed"
+            Get-Content drc_report.json
+          }
+        shell: powershell
       
       # 步骤5：导出原理图为PDF文档
       - name: Export Schematic PDF
         run: |
           # 创建输出目录
-          mkdir -p outputs
+          New-Item -ItemType Directory -Force -Path outputs
           # 将原理图导出为PDF格式，方便查看和打印
-          kicad-cli sch export pdf \
-            --output outputs/229_Test-Schematic.pdf \
+          kicad-cli sch export pdf `
+            --output outputs/229_Test-Schematic.pdf `
             229_Test.kicad_sch
+        shell: powershell
       
       # 步骤6：导出BOM（物料清单）
       - name: Export BOM
         run: |
           # 从原理图导出BOM清单（CSV格式），包含所有元件信息
-          kicad-cli sch export bom \
-            --output outputs/229_Test-BOM.csv \
+          kicad-cli sch export bom `
+            --output outputs/229_Test-BOM.csv `
             229_Test.kicad_sch
+        shell: powershell
       
       # 步骤7：生成Gerber制造文件
       - name: Generate Gerber files
         run: |
           # 创建Gerber输出目录
-          mkdir -p outputs/gerber
+          New-Item -ItemType Directory -Force -Path outputs/gerber
           # 导出所有Gerber层文件（用于PCB制造）
-          kicad-cli pcb export gerbers \
-            --output outputs/gerber/ \
+          kicad-cli pcb export gerbers `
+            --output outputs/gerber/ `
             229_Test.kicad_pcb
           
           # 生成钻孔文件（Excellon格式）
-          kicad-cli pcb export drill \
-            --format excellon \
-            --output outputs/gerber/ \
+          kicad-cli pcb export drill `
+            --format excellon `
+            --output outputs/gerber/ `
             229_Test.kicad_pcb
+        shell: powershell
       
       # 步骤8：导出PCB可视化图像
       - name: Export PCB images
         run: |
           # 导出PCB正面视图（SVG格式）
           # 包含正面铜层、阻焊层、丝印层和板框
-          kicad-cli pcb export svg \
-            --output outputs/229_Test-PCB-Front.svg \
-            --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts \
+          kicad-cli pcb export svg `
+            --output outputs/229_Test-PCB-Front.svg `
+            --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts `
             229_Test.kicad_pcb
           
           # 导出PCB背面视图（SVG格式）
           # 包含背面铜层、阻焊层、丝印层和板框
-          kicad-cli pcb export svg \
-            --output outputs/229_Test-PCB-Back.svg \
-            --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts \
+          kicad-cli pcb export svg `
+            --output outputs/229_Test-PCB-Back.svg `
+            --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts `
             229_Test.kicad_pcb
           
           # 尝试导出3D STEP模型（如果可用）
           # 失败时不中断工作流
-          kicad-cli pcb export step \
-            --output outputs/229_Test-3D.step \
-            229_Test.kicad_pcb || echo "3D export skipped"
+          try {
+            kicad-cli pcb export step `
+              --output outputs/229_Test-3D.step `
+              229_Test.kicad_pcb
+          } catch {
+            Write-Host "3D export skipped"
+          }
+        shell: powershell
       
       # 步骤9：打包Gerber文件为ZIP压缩包
       - name: Create Gerber ZIP archive
         run: |
-          cd outputs/gerber
           # 将所有Gerber文件打包，方便下载和提交给PCB厂商
-          zip -r ../229_Test-Gerber.zip .
-          cd ../..
+          Compress-Archive -Path outputs/gerber/* -DestinationPath outputs/229_Test-Gerber.zip -Force
+        shell: powershell
       
       # 步骤10：上传构建产物到GitHub Artifacts
       # 可在Actions页面下载，保留90天
@@ -139,10 +148,11 @@ jobs:
         run: |
           # 创建包含构建信息的Markdown摘要文件
           # 该文件将被用作Release的说明
-          cat > outputs/build_summary.md << 'EOF'
+          $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
+          @"
           ## Build Summary
           
-          - **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Build Date**: $buildDate
           - **Commit**: ${{ github.sha }}
           - **Branch**: ${{ github.ref_name }}
           
@@ -153,7 +163,8 @@ jobs:
           - ✅ Gerber files
           - ✅ PCB Images (SVG)
           
-          EOF
+          "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
+        shell: powershell
       
       # 步骤12：创建GitHub Release并上传所有文件
       # 仅在推送到主分支时执行（手动触发时不创建Release）
