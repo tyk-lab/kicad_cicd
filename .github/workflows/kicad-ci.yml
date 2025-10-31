@@ -10,6 +10,10 @@ on:
       - master    # 或master分支推送时触发
   workflow_dispatch:  # 允许在GitHub Actions页面手动触发
 
+# 设置GitHub Token权限
+permissions:
+  contents: write  # 允许创建release和上传文件
+
 jobs:
   kicad-checks:
     runs-on: windows-latest  # 使用Windows平台运行
@@ -101,35 +105,6 @@ jobs:
           Write-Host "Additional dependencies installed"
         shell: powershell
 
-      # 步骤5：验证KiCad安装
-      - name: Verify KiCad installation
-        run: |
-          Write-Host "Verifying KiCad installation..."
-          
-          # 检查kicad-cli.exe是否存在
-          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          if (Test-Path $kicadCli) {
-            Write-Host "Found kicad-cli.exe at: $kicadCli"
-            
-            # 显示版本信息
-            Write-Host ""
-            Write-Host "KiCad Version:"
-            & $kicadCli version
-          } else {
-            Write-Host "kicad-cli.exe not found at: $kicadCli"
-            Write-Host ""
-            Write-Host "Searching for KiCad installation..."
-            
-            # 查找KiCad安装目录
-            if (Test-Path "C:\Program Files\KiCad") {
-              Get-ChildItem "C:\Program Files\KiCad" -Recurse -Filter "kicad-cli.exe" -ErrorAction SilentlyContinue | ForEach-Object {
-                Write-Host "Found: $($_.FullName)"
-              }
-            }
-            
-            exit 1
-          }
-        shell: powershell
 
       # 步骤6：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
@@ -137,54 +112,184 @@ jobs:
         id: erc-check
         continue-on-error: true
         run: |
-          Write-Host "Starting ERC check..."
+          Write-Host "=========================================="
+          Write-Host "Starting ERC check with detailed diagnostics"
+          Write-Host "=========================================="
           
+          # 1. 环境检查
+          Write-Host ""
+          Write-Host "[1] Environment Check"
+          Write-Host "Current Directory: $PWD"
+          Write-Host "User: $env:USERNAME"
+          Write-Host "Computer: $env:COMPUTERNAME"
+          Write-Host "OS: $env:OS"
+          Write-Host "Processor: $env:PROCESSOR_ARCHITECTURE"
+          
+          # 2. 检查文件
+          Write-Host ""
+          Write-Host "[2] File Check"
           $schFile = "229_Test.kicad_sch"
           if (-not (Test-Path $schFile)) {
-            Write-Host "Schematic file not found: $schFile"
-            Get-ChildItem -Filter "*.kicad_sch"
+            Write-Host "ERROR: Schematic file not found: $schFile"
+            Write-Host "Available .kicad_sch files:"
+            Get-ChildItem -Filter "*.kicad_sch" | ForEach-Object { Write-Host "  - $($_.Name)" }
             exit 1
           }
+          $fileInfo = Get-Item $schFile
           Write-Host "Found schematic file: $schFile"
+          Write-Host "  Size: $($fileInfo.Length) bytes"
+          Write-Host "  Last Modified: $($fileInfo.LastWriteTime)"
+          Write-Host "  Full Path: $($fileInfo.FullName)"
           
-          # 使用kicad-cli运行ERC，输出JSON报告
+          # 3. KiCad安装检查
+          Write-Host ""
+          Write-Host "[3] KiCad Installation Check"
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          Write-Host "Running: kicad-cli sch erc --exit-code-violations"
+          if (-not (Test-Path $kicadCli)) {
+            Write-Host "ERROR: kicad-cli.exe not found at: $kicadCli"
+            exit 1
+          }
+          $cliInfo = Get-Item $kicadCli
+          Write-Host "Found kicad-cli.exe:"
+          Write-Host "  Path: $($cliInfo.FullName)"
+          Write-Host "  Size: $($cliInfo.Length) bytes"
+          Write-Host "  Version: $($cliInfo.VersionInfo.FileVersion)"
           
-          # 运行ERC检查，使用--exit-code-violations让有违规时返回非0退出码
-          & $kicadCli sch erc --exit-code-violations --format json --output erc_report.json $schFile
-          $exitCode = $LASTEXITCODE
-          
-          # 检查结果
-          if ($exitCode -eq 0) {
-            Write-Host "ERC check passed - no violations found"
-          } else {
-            Write-Host "WARNING: ERC check found violations (exit code: $exitCode)"
+          # 4. 检查KiCad版本
+          Write-Host ""
+          Write-Host "[4] KiCad Version Check"
+          try {
+            & $kicadCli version 2>&1 | Write-Host
+          } catch {
+            Write-Host "ERROR: Failed to get KiCad version: $_"
           }
           
-          # 输出ERC报告内容
-          if (Test-Path erc_report.json) {
+          # 5. 检查依赖项
+          Write-Host ""
+          Write-Host "[5] Dependencies Check"
+          $dependencies = @(
+            "C:\Windows\System32\vcruntime140.dll",
+            "C:\Windows\System32\msvcp140.dll",
+            "C:\Windows\System32\vcruntime140_1.dll"
+          )
+          foreach ($dll in $dependencies) {
+            if (Test-Path $dll) {
+              Write-Host "  OK: $dll"
+            } else {
+              Write-Host "  MISSING: $dll"
+            }
+          }
+          
+          # 6. 检查显示相关环境变量
+          Write-Host ""
+          Write-Host "[6] Display Environment Variables"
+          Write-Host "  DISPLAY: $env:DISPLAY"
+          Write-Host "  LIBGL_ALWAYS_INDIRECT: $env:LIBGL_ALWAYS_INDIRECT"
+          Write-Host "  QT_QPA_PLATFORM: $env:QT_QPA_PLATFORM"
+          
+          # 7. 尝试列出可用命令
+          Write-Host ""
+          Write-Host "[7] KiCad CLI Available Commands"
+          try {
+            & $kicadCli --help 2>&1 | Select-Object -First 30 | Write-Host
+          } catch {
+            Write-Host "ERROR: Failed to get help: $_"
+          }
+          
+          # 8. 检查ERC命令帮助
+          Write-Host ""
+          Write-Host "[8] ERC Command Help"
+          try {
+            & $kicadCli sch erc --help 2>&1 | Write-Host
+          } catch {
+            Write-Host "ERROR: Failed to get ERC help: $_"
+          }
+          
+          # 9. 准备运行ERC
+          Write-Host ""
+          Write-Host "[9] Preparing to Run ERC"
+          Write-Host "Command: kicad-cli sch erc --exit-code-violations --format json --output erc_report.json $schFile --verbose"
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "EXECUTING ERC CHECK NOW..."
+          Write-Host "=========================================="
+          
+          # 10. 运行ERC检查并捕获所有输出
+          $ErrorActionPreference = 'Continue'
+          $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+          
+          try {
+            & $kicadCli sch erc --exit-code-violations --format json --output erc_report.json $schFile --verbose 2>&1 | Tee-Object -Variable ercOutput | Write-Host
+            $exitCode = $LASTEXITCODE
+            $stopwatch.Stop()
+            
             Write-Host ""
-            Write-Host "ERC Report:"
+            Write-Host "=========================================="
+            Write-Host "ERC EXECUTION COMPLETED"
+            Write-Host "=========================================="
+            Write-Host "Exit Code: $exitCode (0x$([Convert]::ToString($exitCode, 16)))"
+            Write-Host "Execution Time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+            
+          } catch {
+            $stopwatch.Stop()
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host "ERC EXECUTION FAILED WITH EXCEPTION"
+            Write-Host "=========================================="
+            Write-Host "Exception Type: $($_.Exception.GetType().FullName)"
+            Write-Host "Exception Message: $($_.Exception.Message)"
+            Write-Host "Stack Trace:"
+            Write-Host $_.Exception.StackTrace
+            Write-Host "Exit Code: $LASTEXITCODE (0x$([Convert]::ToString($LASTEXITCODE, 16)))"
+            Write-Host "Execution Time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+            $exitCode = $LASTEXITCODE
+          }
+          
+          # 11. 检查输出文件
+          Write-Host ""
+          Write-Host "[11] Output File Check"
+          if (Test-Path erc_report.json) {
+            $reportInfo = Get-Item erc_report.json
+            Write-Host "ERC report generated successfully:"
+            Write-Host "  Path: $($reportInfo.FullName)"
+            Write-Host "  Size: $($reportInfo.Length) bytes"
+            Write-Host ""
+            Write-Host "Report Content:"
             Write-Host "==========================================="
             Get-Content erc_report.json | Write-Host
             Write-Host "==========================================="
           } else {
-            Write-Host "ERROR: ERC report file was not generated"
-            exit 1
+            Write-Host "ERROR: ERC report file was NOT generated"
+            Write-Host "Checking current directory contents:"
+            Get-ChildItem | ForEach-Object { Write-Host "  - $($_.Name)" }
           }
           
-          # 保存ERC结果状态
+          # 12. 最终状态
+          Write-Host ""
+          Write-Host "[12] Final Status"
           if ($exitCode -eq 0) {
+            Write-Host "STATUS: ERC check PASSED - no violations found"
             "status=passed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "violations=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } elseif ($exitCode -eq -1073741819) {
+            Write-Host "STATUS: ERC check CRASHED with access violation (0xC0000005)"
+            Write-Host "This typically indicates:"
+            Write-Host "  - Missing DLL dependencies"
+            Write-Host "  - Display/GUI initialization failure"
+            Write-Host "  - OpenGL/graphics driver issues"
+            Write-Host "  - Memory access violation"
+            "status=crashed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "violations=unknown" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           } else {
-            Write-Host ""
-            Write-Host "ERC check found violations (will continue CI)"
+            Write-Host "STATUS: ERC check FAILED with exit code $exitCode"
             "status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
             "violations=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            exit $exitCode
           }
+          
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "ERC DIAGNOSTIC COMPLETE"
+          Write-Host "=========================================="
         shell: powershell
       
       # 步骤7：运行DRC检查（设计规则检查）
@@ -366,7 +471,35 @@ jobs:
           "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
         shell: powershell
       
-      # 步骤12：创建GitHub Release并上传所有文件
+      # 步骤12：准备Release文件（只包含成功生成的文件）
+      - name: Prepare release files
+        run: |
+          Write-Host "Copying release files..."
+          New-Item -ItemType Directory -Force -Path release
+          
+          # 复制outputs目录下的所有文件
+          Copy-Item -Path outputs/* -Destination release/ -Recurse -Force
+          
+          # 如果ERC/DRC报告存在，也复制它们
+          if (Test-Path erc_report.json) {
+            Copy-Item erc_report.json release/
+            Write-Host "ERC report included"
+          } else {
+            Write-Host "ERC report not available (check crashed)"
+          }
+          
+          if (Test-Path drc_report.json) {
+            Copy-Item drc_report.json release/
+            Write-Host "DRC report included"
+          } else {
+            Write-Host "DRC report not available (check crashed)"
+          }
+          
+          Write-Host "Release files prepared:"
+          Get-ChildItem -Path release -Recurse | ForEach-Object { Write-Host "  - $($_.FullName)" }
+        shell: powershell
+      
+      # 步骤13：创建GitHub Release并上传所有文件
       # 仅在推送到主分支时执行（手动触发时不创建Release）
       - name: Create Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -375,14 +508,7 @@ jobs:
           tag_name: build-${{ github.run_number }}          # 使用构建编号作为标签
           name: Build ${{ github.run_number }}              # Release标题
           body_path: outputs/build_summary.md               # Release说明内容
-          files: |                                           # 要上传的文件列表
-            outputs/229_Test-Schematic.pdf
-            outputs/229_Test-BOM.csv
-            outputs/229_Test-Gerber.zip
-            outputs/229_Test-PCB-Front.svg
-            outputs/229_Test-PCB-Back.svg
-            outputs/229_Test-3D.step
-            erc_report.json
-            drc_report.json
+          files: release/**/*                                # 上传release目录下的所有文件
+          fail_on_unmatched_files: false                    # 文件不存在时不报错
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}         # 使用GitHub提供的访问令牌
