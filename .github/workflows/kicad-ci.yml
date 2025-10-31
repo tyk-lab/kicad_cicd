@@ -515,7 +515,10 @@ jobs:
           
           Write-Host ""
           Write-Host "Final release files:"
-          Get-ChildItem -Path release | ForEach-Object { Write-Host "  - $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
+          Get-ChildItem -Path release | ForEach-Object { 
+            $sizeKB = [math]::Round($_.Length/1024, 2)
+            Write-Host "  - $($_.Name) ($sizeKB KB)" 
+          }
         shell: powershell
       
       # 步骤13：创建GitHub Release并上传所有文件
@@ -538,78 +541,78 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "  KiCad CI/CD 执行结果" -ForegroundColor Cyan
+          Write-Host "  KiCad CI/CD Results" -ForegroundColor Cyan
           Write-Host "==========================================" -ForegroundColor Cyan
           Write-Host ""
           
           # 构建信息
-          Write-Host "📋 构建信息:" -ForegroundColor Yellow
-          Write-Host "  • 构建编号: ${{ github.run_number }}"
-          Write-Host "  • 提交SHA: ${{ github.sha }}"
-          Write-Host "  • 分支: ${{ github.ref_name }}"
-          Write-Host "  • 触发方式: ${{ github.event_name }}"
+          Write-Host "[BUILD INFO]" -ForegroundColor Yellow
+          Write-Host "  Build Number: ${{ github.run_number }}"
+          Write-Host "  Commit SHA: ${{ github.sha }}"
+          Write-Host "  Branch: ${{ github.ref_name }}"
+          Write-Host "  Trigger: ${{ github.event_name }}"
           Write-Host ""
           
           # 质量检查结果
-          Write-Host "🔍 质量检查:" -ForegroundColor Yellow
+          Write-Host "[QUALITY CHECKS]" -ForegroundColor Yellow
           $ercStatus = "${{ steps.erc-check.outputs.status }}"
           $drcStatus = "${{ steps.drc-check.outputs.status }}"
           
           if ($ercStatus -eq "passed") {
-            Write-Host "  • ERC检查: ✅ 通过" -ForegroundColor Green
+            Write-Host "  ERC Check: PASSED" -ForegroundColor Green
           } elseif ($ercStatus -eq "crashed") {
-            Write-Host "  • ERC检查: ⚠️ 崩溃 (CI环境限制)" -ForegroundColor Yellow
+            Write-Host "  ERC Check: CRASHED (CI environment limitation)" -ForegroundColor Yellow
           } elseif ($ercStatus -eq "failed") {
-            Write-Host "  • ERC检查: ❌ 发现违规" -ForegroundColor Red
+            Write-Host "  ERC Check: FAILED (violations found)" -ForegroundColor Red
           } else {
-            Write-Host "  • ERC检查: ⏭️ 跳过" -ForegroundColor Gray
+            Write-Host "  ERC Check: SKIPPED" -ForegroundColor Gray
           }
           
           if ($drcStatus -eq "passed") {
-            Write-Host "  • DRC检查: ✅ 通过" -ForegroundColor Green
+            Write-Host "  DRC Check: PASSED" -ForegroundColor Green
           } elseif ($drcStatus -eq "crashed") {
-            Write-Host "  • DRC检查: ⚠️ 崩溃 (CI环境限制)" -ForegroundColor Yellow
+            Write-Host "  DRC Check: CRASHED (CI environment limitation)" -ForegroundColor Yellow
           } elseif ($drcStatus -eq "failed") {
-            Write-Host "  • DRC检查: ❌ 发现违规" -ForegroundColor Red
+            Write-Host "  DRC Check: FAILED (violations found)" -ForegroundColor Red
           } else {
-            Write-Host "  • DRC检查: ⏭️ 跳过" -ForegroundColor Gray
+            Write-Host "  DRC Check: SKIPPED" -ForegroundColor Gray
           }
           Write-Host ""
           
           # 输出文件
-          Write-Host "📦 生成文件:" -ForegroundColor Yellow
+          Write-Host "[GENERATED FILES]" -ForegroundColor Yellow
           if (Test-Path "outputs/229_Test-Schematic.pdf") {
-            Write-Host "  • ✅ 原理图PDF"
+            Write-Host "  + Schematic PDF"
           }
           if (Test-Path "outputs/229_Test-BOM.csv") {
-            Write-Host "  • ✅ BOM物料清单"
+            Write-Host "  + BOM (Bill of Materials)"
           }
           if (Test-Path "outputs/229_Test-Gerber.zip") {
-            $size = [math]::Round((Get-Item "outputs/229_Test-Gerber.zip").Length / 1KB, 2)
-            Write-Host "  • ✅ Gerber制造文件 ($size KB)"
+            $size = [math]::Round((Get-Item "outputs/229_Test-Gerber.zip").Length / 1024, 2)
+            Write-Host "  + Gerber files ($size KB)"
           }
           if (Test-Path "outputs/229_Test-PCB-Front.svg") {
-            Write-Host "  • ✅ PCB正面图像"
+            Write-Host "  + PCB Front Image"
           }
           if (Test-Path "outputs/229_Test-PCB-Back.svg") {
-            Write-Host "  • ✅ PCB背面图像"
+            Write-Host "  + PCB Back Image"
           }
           if (Test-Path "outputs/229_Test-3D.step") {
-            Write-Host "  • ✅ 3D STEP模型"
+            Write-Host "  + 3D STEP Model"
           }
           Write-Host ""
           
           # Release信息
           if ("${{ github.event_name }}" -eq "push" -and ("${{ github.ref }}" -eq "refs/heads/main" -or "${{ github.ref }}" -eq "refs/heads/master")) {
-            Write-Host "🚀 Release:" -ForegroundColor Yellow
-            Write-Host "  • 标签: build-${{ github.run_number }}"
-            Write-Host "  • 查看: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
+            Write-Host "[RELEASE]" -ForegroundColor Yellow
+            Write-Host "  Tag: build-${{ github.run_number }}"
+            Write-Host "  URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
           } else {
-            Write-Host "ℹ️  手动触发构建，未创建Release" -ForegroundColor Gray
+            Write-Host "[INFO] Manual trigger - no release created" -ForegroundColor Gray
           }
           
           Write-Host ""
           Write-Host "==========================================" -ForegroundColor Cyan
-          Write-Host "  ✨ CI/CD 流程完成" -ForegroundColor Cyan
+          Write-Host "  CI/CD Workflow Completed" -ForegroundColor Cyan
           Write-Host "==========================================" -ForegroundColor Cyan
         shell: powershell
