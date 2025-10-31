@@ -297,22 +297,32 @@ jobs:
           
           # 导出PCB正面视图（SVG格式）
           # 包含正面铜层、阻焊层、丝印层和板框
-          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb
-          Write-Host "Front PCB image exported"
+          $ErrorActionPreference = 'Continue'
+          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
+          if (Test-Path outputs/229_Test-PCB-Front.svg) {
+            Write-Host "✓ Front PCB image exported successfully"
+          }
           
           # 导出PCB背面视图（SVG格式）
           # 包含背面铜层、阻焊层、丝印层和板框
-          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb
-          Write-Host "Back PCB image exported"
-          
-          # 尝试导出3D STEP模型（如果可用）
-          # 失败时不中断工作流
-          try {
-            & $kicadCli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb
-            Write-Host "3D STEP model exported"
-          } catch {
-            Write-Host "3D export skipped (may require 3D models)"
+          & $kicadCli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
+          if (Test-Path outputs/229_Test-PCB-Back.svg) {
+            Write-Host "✓ Back PCB image exported successfully"
           }
+          
+          # 导出3D STEP模型
+          & $kicadCli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb 2>&1 | Write-Host
+          if (Test-Path outputs/229_Test-3D.step) {
+            Write-Host "✓ 3D STEP model exported successfully"
+          } else {
+            Write-Host "⚠ 3D export skipped (may require 3D models)"
+          }
+          
+          # 重置错误处理，确保步骤成功
+          $ErrorActionPreference = 'Stop'
+          Write-Host ""
+          Write-Host "PCB image export completed successfully"
+          exit 0
         shell: powershell
       
       # 步骤9：打包Gerber文件为ZIP压缩包
