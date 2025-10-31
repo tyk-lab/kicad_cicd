@@ -29,11 +29,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            /snap/kicad
             /usr/bin/kicad-cli
             /usr/share/kicad
-          key: kicad-latest-${{ runner.os }}
+          key: kicad-snap-${{ runner.os }}-v2
           restore-keys: |
-            kicad-latest-${{ runner.os }}
+            kicad-snap-${{ runner.os }}-
       
       # 步骤3：检查KiCad是否已缓存
       - name: Check KiCad from cache
@@ -63,26 +64,41 @@ jobs:
         if: steps.check-kicad.outputs.cached == 'false'
         run: |
           echo "========================================"
-          echo "Installing KiCad and dependencies..."
+          echo "Installing KiCad (optimized method)..."
           echo "========================================"
           
-          # 添加KiCad 9.0 PPA获取最新版本
-          sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
-          sudo apt-get update
+          # 方案1：使用snap安装（最快，单一包）
+          echo "Installing KiCad via snap (fastest method)..."
+          sudo snap install kicad --classic
           
-          echo ""
-          echo "Installing KiCad 9.0 (latest version from PPA)..."
-          sudo apt-get install -y kicad kicad-libraries
+          # 创建符号链接以便缓存能找到
+          sudo ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli 2>/dev/null || true
           
           echo ""
           echo "Verifying installation..."
           if command -v kicad-cli &> /dev/null; then
-            echo "KiCad installed successfully"
+            echo "✓ KiCad installed successfully"
             kicad-cli version
           else
-            echo "ERROR: KiCad installation failed"
-            exit 1
+            echo "✗ Snap installation failed, trying apt method..."
+            
+            # 备用方案：使用apt但只安装必需包
+            sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+            sudo apt-get update -qq
+            
+            # 只安装CLI工具，不安装GUI和所有库（节省时间）
+            sudo apt-get install -y --no-install-recommends kicad-cli
+            
+            if command -v kicad-cli &> /dev/null; then
+              echo "✓ KiCad CLI installed successfully"
+              kicad-cli version
+            else
+              echo "ERROR: KiCad installation failed"
+              exit 1
+            fi
           fi
+          
+          echo "========================================"
         shell: bash
       
       # 步骤6：运行ERC检查（电气规则检查）
