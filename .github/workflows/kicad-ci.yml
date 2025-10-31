@@ -41,12 +41,12 @@ jobs:
           
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
           if (Test-Path $kicadCli) {
-            Write-Host "✓ KiCad found at: $kicadCli"
+            Write-Host "KiCad found at: $kicadCli"
             & $kicadCli version
-            echo "cached=true" >> $env:GITHUB_OUTPUT
+            "cached=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           } else {
-            Write-Host "✗ KiCad not found, will install"
-            echo "cached=false" >> $env:GITHUB_OUTPUT
+            Write-Host "KiCad not found, will install"
+            "cached=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
         shell: powershell
       
@@ -147,63 +147,35 @@ jobs:
       # 步骤6：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
       - name: Run ERC (Electrical Rules Check)
+        id: erc-check
         continue-on-error: true
         run: |
           Write-Host "Starting ERC check..."
           
-          # 检查原理图文件是否存在
           $schFile = "229_Test.kicad_sch"
           if (-not (Test-Path $schFile)) {
             Write-Host "Schematic file not found: $schFile"
-            Write-Host ""
-            Write-Host "Available .kicad_sch files:"
             Get-ChildItem -Filter "*.kicad_sch"
             exit 1
           }
           Write-Host "Found schematic file: $schFile"
           
-          # 使用完整路径调用kicad-cli
+          # 使用kicad-cli运行ERC，输出JSON报告
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          Write-Host ""
-          Write-Host "Running ERC check with: $kicadCli"
+          Write-Host "Running: kicad-cli sch erc --exit-code-violations"
           
-          # 检查依赖的DLL是否存在
-          $kicadBin = "C:\Program Files\KiCad\9.0\bin"
-          if (Test-Path $kicadBin) {
-            Write-Host "KiCad bin directory contents:"
-            Get-ChildItem $kicadBin -Filter "*.dll" | Select-Object -First 5 | ForEach-Object { Write-Host "  $($_.Name)" }
+          # 运行ERC检查，使用--exit-code-violations让有违规时返回非0退出码
+          & $kicadCli sch erc --exit-code-violations --format json --output erc_report.json $schFile
+          $exitCode = $LASTEXITCODE
+          
+          # 检查结果
+          if ($exitCode -eq 0) {
+            Write-Host "✓ ERC check passed - no violations found"
+          } else {
+            Write-Host "⚠ ERC check found violations (exit code: $exitCode)"
           }
           
-          try {
-            & $kicadCli sch erc --format json --output erc_report.json $schFile 2>&1 | Write-Host
-            $exitCode = $LASTEXITCODE
-            
-            if ($exitCode -eq 0) {
-              Write-Host "ERC check completed successfully"
-            } elseif ($exitCode -eq -1073741819) {
-              Write-Host "ERROR: KiCad crashed (Access Violation - missing dependencies)"
-              Write-Host "This may indicate missing Visual C++ Runtime or other dependencies"
-
-              Write-Host "PATH: $env:PATH"
-              if (Test-Path $kicadBin) {
-                Write-Host "KiCad bin DLLs:"
-                Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
-              }
-            } else {
-              Write-Host "ERC check completed with exit code: $exitCode"
-            }
-          } catch {
-            Write-Host "ERC check failed: $_"
-            Write-Host $_.Exception.Message
-
-            Write-Host "PATH: $env:PATH"
-            if (Test-Path $kicadBin) {
-              Write-Host "KiCad bin DLLs:"
-              Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
-            }
-          }
-          
-          # 检查报告文件是否生成并输出内容
+          # 输出ERC报告内容
           if (Test-Path erc_report.json) {
             Write-Host ""
             Write-Host "ERC Report:"
@@ -211,51 +183,55 @@ jobs:
             Get-Content erc_report.json | Write-Host
             Write-Host "==========================================="
           } else {
-            Write-Host "WARNING: ERC report file was not generated"
-            # 创建一个空报告文件避免后续步骤失败
-            '{"violations":[]}' | Out-File -FilePath erc_report.json -Encoding utf8
+            Write-Host "ERROR: ERC report file was not generated"
+            exit 1
+          }
+          
+          # 保存ERC结果状态
+          if ($exitCode -eq 0) {
+            "status=passed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "violations=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Host ""
+            Write-Host "ERC check found violations (will continue CI)"
+            "status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "violations=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit $exitCode
           }
         shell: powershell
       
       # 步骤7：运行DRC检查（设计规则检查）
       # 检查PCB设计中的布线错误，如间距不足、悬空走线等
       - name: Run DRC (Design Rules Check)
+        id: drc-check
         continue-on-error: true
         run: |
           Write-Host "Starting DRC check..."
           
-          # 检查PCB文件是否存在
           $pcbFile = "229_Test.kicad_pcb"
           if (-not (Test-Path $pcbFile)) {
             Write-Host "PCB file not found: $pcbFile"
-            Write-Host ""
-            Write-Host "Available .kicad_pcb files:"
             Get-ChildItem -Filter "*.kicad_pcb"
             exit 1
           }
           Write-Host "Found PCB file: $pcbFile"
           
-          # 使用完整路径调用kicad-cli
+          # 使用kicad-cli运行DRC，输出JSON报告
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
-          Write-Host ""
-          Write-Host "Running DRC check with: $kicadCli"
+          Write-Host "Running: kicad-cli pcb drc --exit-code-violations"
           
-          try {
-            & $kicadCli pcb drc --format json --output drc_report.json $pcbFile
-            $exitCode = $LASTEXITCODE
-            
-            if ($exitCode -eq 0) {
-              Write-Host "DRC check completed successfully"
-            } else {
-              Write-Host "DRC check completed with warnings/errors (exit code: $exitCode)"
-            }
-          } catch {
-            Write-Host "DRC check failed: $_"
-            Write-Host $_.Exception.Message
-            exit 1
+          # 运行DRC检查，使用--exit-code-violations让有违规时返回非0退出码
+          & $kicadCli pcb drc --exit-code-violations --format json --output drc_report.json $pcbFile
+          $exitCode = $LASTEXITCODE
+          
+          # 检查结果
+          if ($exitCode -eq 0) {
+            Write-Host "✓ DRC check passed - no violations found"
+          } else {
+            Write-Host "⚠ DRC check found violations (exit code: $exitCode)"
           }
           
-          # 检查报告文件是否生成并输出内容
+          # 输出DRC报告内容
           if (Test-Path drc_report.json) {
             Write-Host ""
             Write-Host "DRC Report:"
@@ -263,9 +239,20 @@ jobs:
             Get-Content drc_report.json | Write-Host
             Write-Host "==========================================="
           } else {
-            Write-Host "WARNING: DRC report file was not generated"
-            # 创建一个空报告文件避免后续步骤失败
-            '{"violations":[]}' | Out-File -FilePath drc_report.json -Encoding utf8
+            Write-Host "ERROR: DRC report file was not generated"
+            exit 1
+          }
+          
+          # 保存DRC结果状态
+          if ($exitCode -eq 0) {
+            "status=passed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "violations=0" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Host ""
+            Write-Host "DRC check found violations (will continue CI)"
+            "status=failed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "violations=1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit $exitCode
           }
         shell: powershell
       
@@ -362,6 +349,11 @@ jobs:
           # 该文件将被用作Release的说明
           $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC")
           $cacheStatus = if ('${{ steps.cache-kicad.outputs.cache-hit }}' -eq 'true') { 'Used cached installation' } else { 'Fresh installation' }
+          
+          # ERC/DRC状态
+          $ercStatus = if ('${{ steps.erc-check.outputs.status }}' -eq 'passed') { '✅ Passed' } else { '❌ Failed' }
+          $drcStatus = if ('${{ steps.drc-check.outputs.status }}' -eq 'passed') { '✅ Passed' } else { '❌ Failed' }
+          
           @"
           ## Build Summary
           
@@ -370,12 +362,19 @@ jobs:
           - **Branch**: ${{ github.ref_name }}
           - **KiCad Setup**: $cacheStatus
           
+          ### Quality Checks
+          
+          - **ERC (Electrical Rules Check)**: $ercStatus
+          - **DRC (Design Rules Check)**: $drcStatus
+          
           ### Outputs
           
           - ✅ Schematic PDF
           - ✅ BOM (Bill of Materials)
           - ✅ Gerber files
           - ✅ PCB Images (SVG)
+          - 📄 ERC Report (JSON)
+          - 📄 DRC Report (JSON)
           
           "@ | Out-File -FilePath outputs/build_summary.md -Encoding utf8
         shell: powershell
