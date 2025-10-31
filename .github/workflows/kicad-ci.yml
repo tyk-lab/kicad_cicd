@@ -12,7 +12,7 @@ on:
 
 jobs:
   kicad-checks:
-    runs-on: ubuntu-latest  # 使用最新的Ubuntu运行器
+    runs-on: ubuntu-22.04  # 使用Ubuntu 22.04 (Jammy) 避免依赖冲突
     
     steps:
       # 步骤1：检出代码仓库
@@ -26,7 +26,8 @@ jobs:
           sudo add-apt-repository --yes ppa:kicad/kicad-7.0-releases
           sudo apt update
           # 安装KiCad主程序和库文件
-          sudo apt install -y kicad kicad-libraries
+          # 使用 --fix-broken 和 --no-install-recommends 避免依赖问题
+          sudo apt install -y --fix-broken --no-install-recommends kicad kicad-libraries
       
       # 步骤3：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
