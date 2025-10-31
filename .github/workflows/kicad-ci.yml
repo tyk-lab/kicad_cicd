@@ -67,33 +67,43 @@ jobs:
           echo "Installing KiCad (optimized method)..."
           echo "========================================"
           
-          # 方案1：使用snap安装（最快，单一包）
-          echo "Installing KiCad via snap (fastest method)..."
-          sudo snap install kicad --classic
-          
-          # 创建符号链接以便缓存能找到
-          sudo ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli 2>/dev/null || true
+          # 方案1：使用snap安装（最快，约30-60秒）
+          echo "Installing KiCad via snap..."
+          sudo snap install kicad
           
           echo ""
-          echo "Verifying installation..."
-          if command -v kicad-cli &> /dev/null; then
-            echo "✓ KiCad installed successfully"
-            kicad-cli version
+          echo "Checking snap installation..."
+          
+          # Snap可能安装到不同路径，尝试查找
+          if [ -f "/snap/bin/kicad-cli" ]; then
+            echo "✓ Found kicad-cli at /snap/bin/kicad-cli"
+            sudo ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli
+            /snap/bin/kicad-cli version
+            touch ~/.kicad-installed
+          elif [ -f "/snap/bin/kicad.kicad-cli" ]; then
+            echo "✓ Found kicad.kicad-cli at /snap/bin/"
+            sudo ln -sf /snap/bin/kicad.kicad-cli /usr/bin/kicad-cli
+            /snap/bin/kicad.kicad-cli version
+            touch ~/.kicad-installed
           else
-            echo "✗ Snap installation failed, trying apt method..."
+            echo "⚠ Snap CLI not accessible, trying apt method..."
             
-            # 备用方案：使用apt但只安装必需包
+            # 备用方案：使用apt安装完整包
             sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
-            sudo apt-get update -qq
+            sudo apt-get update
             
-            # 只安装CLI工具，不安装GUI和所有库（节省时间）
-            sudo apt-get install -y --no-install-recommends kicad-cli
+            # 安装KiCad完整包（包含CLI工具）
+            echo "Installing KiCad from PPA (this may take 2-3 minutes)..."
+            sudo apt-get install -y kicad
             
             if command -v kicad-cli &> /dev/null; then
-              echo "✓ KiCad CLI installed successfully"
+              echo "✓ KiCad installed successfully from PPA"
               kicad-cli version
+              touch ~/.kicad-installed
             else
               echo "ERROR: KiCad installation failed"
+              echo "Searching for kicad commands:"
+              ls -la /usr/bin/kicad* 2>/dev/null || echo "No kicad commands found in /usr/bin/"
               exit 1
             fi
           fi
