@@ -24,21 +24,28 @@ jobs:
         id: cache-kicad
         uses: actions/cache@v4
         with:
-          path: C:\Program Files\KiCad
-          key: kicad-9.0.6-windows-${{ runner.os }}
+          path: |
+            C:\Program Files\KiCad\9.0
+            C:\ProgramData\chocolatey\lib\kicad
+          key: kicad-9.0.6-${{ runner.os }}-${{ hashFiles('.github/workflows/kicad-ci.yml') }}
           restore-keys: |
-            kicad-9.0.6-windows-
+            kicad-9.0.6-${{ runner.os }}-
+            kicad-9.0.6-
       
       # 步骤3：检查KiCad是否已缓存
       - name: Check KiCad from cache
         id: check-kicad
         run: |
+          Write-Host "Cache hit status: ${{ steps.cache-kicad.outputs.cache-hit }}"
+          Write-Host "Checking KiCad installation..."
+          
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
           if (Test-Path $kicadCli) {
-            Write-Host "KiCad found in cache"
+            Write-Host "✓ KiCad found at: $kicadCli"
+            & $kicadCli version
             echo "cached=true" >> $env:GITHUB_OUTPUT
           } else {
-            Write-Host "KiCad not found, will install"
+            Write-Host "✗ KiCad not found, will install"
             echo "cached=false" >> $env:GITHUB_OUTPUT
           }
         shell: powershell
@@ -47,15 +54,27 @@ jobs:
       - name: Setup KiCad environment
         if: steps.check-kicad.outputs.cached == 'false'
         run: |
+          Write-Host "========================================"
+          Write-Host "Installing KiCad and dependencies..."
+          Write-Host "========================================"
+          
           Write-Host "Installing Visual C++ Redistributable..."
-          # 安装必要的运行时库
-          choco install vcredist-all -y
+          choco install vcredist-all -y --no-progress
           
+          Write-Host ""
           Write-Host "Installing KiCad 9.0.6..."
-          # 使用Chocolatey安装KiCad最新版本 9.0.6
-          choco install kicad --version=9.0.6 -y
+          choco install kicad --version=9.0.6 -y --no-progress
           
-          Write-Host "KiCad installation completed"
+          Write-Host ""
+          Write-Host "Verifying installation..."
+          $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
+          if (Test-Path $kicadCli) {
+            Write-Host "✓ KiCad installed successfully"
+            & $kicadCli version
+          } else {
+            Write-Host "✗ KiCad installation failed"
+            exit 1
+          }
         shell: powershell
       
       # 步骤4.5：配置环境变量
@@ -295,34 +314,30 @@ jobs:
           Write-Host "Exporting PCB images..."
           $kicadCli = "C:\Program Files\KiCad\9.0\bin\kicad-cli.exe"
           
-          # 导出PCB正面视图（SVG格式）
-          # 包含正面铜层、阻焊层、丝印层和板框
           $ErrorActionPreference = 'Continue'
+          
+          # 导出PCB正面视图（SVG格式）
           & $kicadCli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path outputs/229_Test-PCB-Front.svg) {
-            Write-Host "✓ Front PCB image exported successfully"
+          if (Test-Path "outputs/229_Test-PCB-Front.svg") {
+            Write-Host "Front PCB image exported successfully"
           }
           
           # 导出PCB背面视图（SVG格式）
-          # 包含背面铜层、阻焊层、丝印层和板框
           & $kicadCli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path outputs/229_Test-PCB-Back.svg) {
-            Write-Host "✓ Back PCB image exported successfully"
+          if (Test-Path "outputs/229_Test-PCB-Back.svg") {
+            Write-Host "Back PCB image exported successfully"
           }
           
           # 导出3D STEP模型
           & $kicadCli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb 2>&1 | Write-Host
-          if (Test-Path outputs/229_Test-3D.step) {
-            Write-Host "✓ 3D STEP model exported successfully"
+          if (Test-Path "outputs/229_Test-3D.step") {
+            Write-Host "3D STEP model exported successfully"
           } else {
-            Write-Host "⚠ 3D export skipped (may require 3D models)"
+            Write-Host "3D export skipped (may require 3D models)"
           }
           
-          # 重置错误处理，确保步骤成功
           $ErrorActionPreference = 'Stop'
-          Write-Host ""
-          Write-Host "PCB image export completed successfully"
-          exit 0
+          Write-Host "PCB image export completed"
         shell: powershell
       
       # 步骤9：打包Gerber文件为ZIP压缩包
