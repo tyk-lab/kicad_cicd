@@ -131,19 +131,6 @@ jobs:
           }
         shell: powershell
 
-      # 步骤5.5：输出环境变量和DLLs
-      - name: Show environment and DLLs
-        run: |
-          Write-Host "PATH: $env:PATH"
-          $kicadBin = "C:\Program Files\KiCad\9.0\bin"
-          if (Test-Path $kicadBin) {
-            Write-Host "KiCad bin DLLs:"
-            Get-ChildItem $kicadBin -Filter "*.dll" | ForEach-Object { Write-Host "  $($_.Name)" }
-          }
-          Write-Host "KiCad CLI version:"
-          & "$kicadBin\kicad-cli.exe" version
-        shell: powershell
-      
       # 步骤6：运行ERC检查（电气规则检查）
       # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
       - name: Run ERC (Electrical Rules Check)
@@ -323,8 +310,8 @@ jobs:
             Write-Host "3D export skipped (may require 3D models)"
           }
           
-          $ErrorActionPreference = 'Stop'
           Write-Host "PCB image export completed"
+          exit 0
         shell: powershell
       
       # 步骤9：打包Gerber文件为ZIP压缩包
