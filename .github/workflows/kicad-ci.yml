@@ -108,7 +108,27 @@ jobs:
             fi
           fi
           
-          echo "========================================"
+          echo "=========================================="
+        shell: bash
+      
+      # 步骤5：验证KiCad CLI可用性
+      - name: Verify KiCad CLI
+        run: |
+          if command -v kicad.kicad-cli &> /dev/null; then
+            echo "✓ KiCad CLI is available (snap version)"
+            kicad.kicad-cli version
+            echo "KICAD_CLI=kicad.kicad-cli" >> $GITHUB_ENV
+          elif command -v kicad-cli &> /dev/null; then
+            echo "✓ KiCad CLI is available"
+            kicad-cli version
+            echo "KICAD_CLI=kicad-cli" >> $GITHUB_ENV
+          else
+            echo "ERROR: kicad-cli not found in PATH"
+            echo "PATH: $PATH"
+            echo "Available kicad commands:"
+            compgen -c | grep kicad || echo "None"
+            exit 1
+          fi
         shell: bash
       
       # 步骤6：运行ERC检查（电气规则检查）
@@ -132,8 +152,8 @@ jobs:
           echo "Found schematic file: $schFile"
           echo "Running ERC check..."
           
-          # 运行ERC检查
-          kicad-cli sch erc --exit-code-violations --severity-all --format json --output erc_report.json "$schFile" || true
+          # 运行ERC检查（使用环境变量中的命令）
+          ${KICAD_CLI} sch erc --exit-code-violations --severity-all --format json --output erc_report.json "$schFile" || true
           exitCode=$?
           
           # 检查结果
@@ -179,8 +199,8 @@ jobs:
           echo "Found PCB file: $pcbFile"
           echo "Running DRC check..."
           
-          # 运行DRC检查
-          kicad-cli pcb drc --exit-code-violations --severity-all --format json --output drc_report.json "$pcbFile" || true
+          # 运行DRC检查（使用环境变量中的命令）
+          ${KICAD_CLI} pcb drc --exit-code-violations --severity-all --format json --output drc_report.json "$pcbFile" || true
           exitCode=$?
           
           # 检查结果
@@ -210,56 +230,52 @@ jobs:
         run: |
           echo "Exporting schematic to PDF..."
           mkdir -p outputs
-          kicad-cli sch export pdf --output outputs/229_Test-Schematic.pdf 229_Test.kicad_sch
-          echo "Schematic PDF exported"
+          ${KICAD_CLI} sch export pdf --output outputs/229_Test-Schematic.pdf 229_Test.kicad_sch
+          echo "✓ Schematic PDF exported"
         shell: bash
       
-      # 步骤6：导出BOM（物料清单）
+      # 步骤9：导出BOM（物料清单）
       - name: Export BOM
         run: |
           echo "Exporting BOM..."
-          kicad-cli sch export bom --output outputs/229_Test-BOM.csv 229_Test.kicad_sch
-          echo "BOM exported"
+          ${KICAD_CLI} sch export bom --output outputs/229_Test-BOM.csv 229_Test.kicad_sch
+          echo "✓ BOM exported"
         shell: bash
       
-      # 步骤7：生成Gerber制造文件
+      # 步骤10：生成Gerber制造文件
       - name: Generate Gerber files
         run: |
           echo "Generating Gerber files..."
           mkdir -p outputs/gerber
           
           # 导出所有Gerber层文件（用于PCB制造）
-          kicad-cli pcb export gerbers --output outputs/gerber/ 229_Test.kicad_pcb
-          echo "Gerber layers exported"
+          ${KICAD_CLI} pcb export gerbers --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "✓ Gerber layers exported"
           
-          # 生成钆孔文件（Excellon格式）
-          kicad-cli pcb export drill --format excellon --output outputs/gerber/ 229_Test.kicad_pcb
-          echo "Drill files generated"
+          # 生成钻孔文件（Excellon格式）
+          ${KICAD_CLI} pcb export drill --format excellon --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "✓ Drill files generated"
         shell: bash
       
-      # 步骤8：导出PCB可视化图像
+      # 步骤11：导出PCB可视化图像
       - name: Export PCB images
         run: |
           echo "Exporting PCB images..."
           
           # 导出PCB正面视图（SVG格式）
-          kicad-cli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
-          if [ -f "outputs/229_Test-PCB-Front.svg" ]; then
-            echo "Front PCB image exported successfully"
-          fi
+          ${KICAD_CLI} pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          [ -f "outputs/229_Test-PCB-Front.svg" ] && echo "✓ Front PCB image exported"
           
           # 导出PCB背面视图（SVG格式）
-          kicad-cli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
-          if [ -f "outputs/229_Test-PCB-Back.svg" ]; then
-            echo "Back PCB image exported successfully"
-          fi
+          ${KICAD_CLI} pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          [ -f "outputs/229_Test-PCB-Back.svg" ] && echo "✓ Back PCB image exported"
           
           # 导出3D STEP模型
-          kicad-cli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb || true
+          ${KICAD_CLI} pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb || true
           if [ -f "outputs/229_Test-3D.step" ]; then
-            echo "3D STEP model exported successfully"
+            echo "✓ 3D STEP model exported"
           else
-            echo "3D export skipped (may require 3D models)"
+            echo "⚠ 3D export skipped (may require 3D models)"
           fi
           
           echo "PCB image export completed"
