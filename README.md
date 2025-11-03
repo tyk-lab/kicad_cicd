@@ -7,9 +7,24 @@
 <!-- BUILD_STATUS_START -->
 ## 📊 最新构建状态
 
-**构建 #0** | **状态: 等待首次构建** | **时间: --**
+**构建 #24** | **状态: ✗ 失败** | **时间: 2025-11-03 06:55:20 UTC**
 
-![ERC](https://img.shields.io/badge/ERC-待运行-lightgrey) ![DRC](https://img.shields.io/badge/DRC-待运行-lightgrey)
+![ERC](https://img.shields.io/badge/ERC-✓_通过-success) ![DRC](https://img.shields.io/badge/DRC-✗_12_错误-critical)
+
+<details>
+<summary>📋 详细报告</summary>
+
+### ERC 检查
+- **状态**: PASSED
+- **错误**: 0 个
+- **警告**: 0 个
+
+### DRC 检查
+- **状态**: FAILED
+- **错误**: 12 个
+- **警告**: 18 个
+
+</details>
 
 <!-- BUILD_STATUS_END -->
 
