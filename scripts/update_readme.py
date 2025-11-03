@@ -7,7 +7,7 @@
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 
 def load_build_results(output_dir: str) -> dict:
@@ -16,7 +16,10 @@ def load_build_results(output_dir: str) -> dict:
     results = {
         "erc": {"status": "unknown", "errors": 0, "warnings": 0},
         "drc": {"status": "unknown", "errors": 0, "warnings": 0},
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "timestamp": datetime.now(timezone(timedelta(hours=8))).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        + " 北京时间",
     }
 
     # 读取 ERC 报告
