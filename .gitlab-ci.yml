@@ -169,22 +169,12 @@ kicad-export:
     name: "${KICAD_PROJECT_NAME}-outputs-$CI_PIPELINE_ID"
     paths:
       - ${OUTPUT_DIR}/
-    expire_in: 7 days  # MR保留7天
+    expire_in: 30 days  # 默认保留30天（MR通过workflow rules中的variables控制）
     when: always  # 即使失败也上传报告
     reports:
       dotenv: build.env
   
   allow_failure: false
-  
-  rules:
-    # MR：短期保留
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      artifacts:
-        expire_in: 7 days
-    # 主分支：长期保留
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      artifacts:
-        expire_in: 30 days
 
 # ==================== 阶段3：更新README ====================
 update-readme:
@@ -299,9 +289,4 @@ create-release:
         - name: "Build Summary"
           url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/release/build_summary.md"
           link_type: other
-  
-  only:
-    - main
-    - master
-    - tags
 

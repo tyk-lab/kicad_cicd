@@ -15,11 +15,6 @@ on:
       - '**.kicad_pcb'
       - 'scripts/**'
       - '.github/workflows/kicad-ci.yml'
-    # 排除文档和配置文件
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
   
   # Pull Request：只运行检查，不发布
   pull_request:
@@ -75,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.kicad-installed
-          key: kicad-snap-${{ runner.os }}-${{ hashFiles('.github/workflows/kicad-ci-simple.yml') }}
+          key: kicad-snap-${{ runner.os }}-${{ hashFiles('.github/workflows/kicad-ci.yml') }}
       
       # 步骤3：检查KiCad是否已安装
       - name: Check KiCad installation
@@ -146,10 +141,10 @@ jobs:
           
           # 手动触发：根据输入决定
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.skip_checks }}" = "true" ]; then
+            if [ "${{ github.event.inputs.skip_checks }}" = "true" ]; then
               SKIP_CHECKS="--skip-checks"
             fi
-            if [ "${{ inputs.skip_exports }}" = "true" ]; then
+            if [ "${{ github.event.inputs.skip_exports }}" = "true" ]; then
               SKIP_EXPORTS="--skip-exports"
             fi
           fi
@@ -213,7 +208,7 @@ jobs:
       - name: Prepare release files
         if: |
           (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
         run: |
           mkdir -p release
           
@@ -238,7 +233,7 @@ jobs:
       - name: Create Release
         if: |
           (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}
