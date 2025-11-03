@@ -1,8 +1,17 @@
 # 229测试板 KiCad项目
 
-[![KiCad CI/CD](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/kicad-ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/kicad-ci.yml)
+[![KiCad CI/CD](https://github.com/tyk-lab/kicad_cicd/actions/workflows/kicad-ci.yml/badge.svg)](https://github.com/tyk-lab/kicad_cicd/actions/workflows/kicad-ci.yml)
 
 这是一个使用KiCad设计的PCB项目，包含自动化CI/CD流程。
+
+<!-- BUILD_STATUS_START -->
+## 📊 最新构建状态
+
+**构建 #0** | **状态: 等待首次构建** | **时间: --**
+
+![ERC](https://img.shields.io/badge/ERC-待运行-lightgrey) ![DRC](https://img.shields.io/badge/DRC-待运行-lightgrey)
+
+<!-- BUILD_STATUS_END -->
 
 ## 项目概述
 

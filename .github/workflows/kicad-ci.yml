@@ -124,7 +124,28 @@ jobs:
           name: ${{ env.KICAD_PROJECT_NAME }}-outputs
           path: ${{ env.OUTPUT_DIR }}/
       
-      # 步骤7：准备Release文件
+      # 步骤7：更新README构建状态
+      - name: Update README with build status
+        run: |
+          # 运行README更新脚本
+          python3 scripts/update_readme.py \
+            -o ${{ env.OUTPUT_DIR }} \
+            -r README.md \
+            -b ${{ github.run_number }}
+          
+          # 检查是否有变化
+          if git diff --quiet README.md; then
+            echo "README 无变化"
+          else
+            echo "README 已更新"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs: 更新构建状态 #${{ github.run_number }} [skip ci]"
+            git push
+          fi
+      
+      # 步骤8：准备Release文件
       - name: Prepare release files
         run: |
           mkdir -p release
@@ -146,7 +167,7 @@ jobs:
           
           echo "Release包大小: $(du -sh release | cut -f1)"
       
-      # 步骤8：创建GitHub Release
+      # 步骤9：创建GitHub Release
       - name: Create Release
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v1
@@ -159,7 +180,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      # 步骤9：显示构建结果摘要
+      # 步骤10：显示构建结果摘要
       - name: Display Build Results
         if: always()
         run: |
