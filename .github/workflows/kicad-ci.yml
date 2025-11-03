@@ -14,6 +14,11 @@ on:
 permissions:
   contents: write
 
+# 全局环境变量配置
+env:
+  KICAD_PROJECT_NAME: "229_Test"  # KiCad项目名称（不含扩展名）
+  OUTPUT_DIR: "outputs"            # 输出目录
+
 jobs:
   kicad-build:
     runs-on: ubuntu-22.04
@@ -89,21 +94,21 @@ jobs:
           chmod +x scripts/kicad_export.py
           
           # 运行导出脚本
-          python3 scripts/kicad_export.py 229_Test.kicad_pro -o outputs
+          python3 scripts/kicad_export.py ${{ env.KICAD_PROJECT_NAME }}.kicad_pro -o ${{ env.OUTPUT_DIR }}
           
           exit_code=$?
           
           # 读取结果供后续步骤使用
-          if [ -f "outputs/erc_report.json" ]; then
-            violations=$(python3 -c "import json; data=json.load(open('outputs/erc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
+          if [ -f "${{ env.OUTPUT_DIR }}/erc_report.json" ]; then
+            violations=$(python3 -c "import json; data=json.load(open('${{ env.OUTPUT_DIR }}/erc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
             echo "erc_violations=$violations" >> $GITHUB_OUTPUT
             [ "$violations" = "0" ] && echo "erc_status=passed" >> $GITHUB_OUTPUT || echo "erc_status=failed" >> $GITHUB_OUTPUT
           else
             echo "erc_status=skipped" >> $GITHUB_OUTPUT
           fi
           
-          if [ -f "outputs/drc_report.json" ]; then
-            violations=$(python3 -c "import json; data=json.load(open('outputs/drc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
+          if [ -f "${{ env.OUTPUT_DIR }}/drc_report.json" ]; then
+            violations=$(python3 -c "import json; data=json.load(open('${{ env.OUTPUT_DIR }}/drc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
             echo "drc_violations=$violations" >> $GITHUB_OUTPUT
             [ "$violations" = "0" ] && echo "drc_status=passed" >> $GITHUB_OUTPUT || echo "drc_status=failed" >> $GITHUB_OUTPUT
           else
@@ -116,8 +121,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kicad-outputs
-          path: outputs/
+          name: ${{ env.KICAD_PROJECT_NAME }}-outputs
+          path: ${{ env.OUTPUT_DIR }}/
       
       # 步骤7：准备Release文件
       - name: Prepare release files
@@ -125,15 +130,19 @@ jobs:
           mkdir -p release
           
           # 复制关键输出文件
-          for file in outputs/229_Test-Schematic.pdf outputs/229_Test-BOM.csv outputs/229_Test-Gerber.zip \
-                      outputs/229_Test-PCB-Front.svg outputs/229_Test-PCB-Back.svg outputs/229_Test-3D.step; do
+          for file in ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-Schematic.pdf \
+                      ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-BOM.csv \
+                      ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-Gerber.zip \
+                      ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-PCB-Front.svg \
+                      ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-PCB-Back.svg \
+                      ${{ env.OUTPUT_DIR }}/${{ env.KICAD_PROJECT_NAME }}-3D.step; do
             [ -f "$file" ] && cp "$file" release/ && echo "✓ $(basename $file)"
           done
           
           # 复制报告和摘要
-          [ -f "outputs/erc_report.json" ] && cp outputs/erc_report.json release/
-          [ -f "outputs/drc_report.json" ] && cp outputs/drc_report.json release/
-          [ -f "outputs/build_summary.md" ] && cp outputs/build_summary.md release/
+          [ -f "${{ env.OUTPUT_DIR }}/erc_report.json" ] && cp ${{ env.OUTPUT_DIR }}/erc_report.json release/
+          [ -f "${{ env.OUTPUT_DIR }}/drc_report.json" ] && cp ${{ env.OUTPUT_DIR }}/drc_report.json release/
+          [ -f "${{ env.OUTPUT_DIR }}/build_summary.md" ] && cp ${{ env.OUTPUT_DIR }}/build_summary.md release/
           
           echo "Release包大小: $(du -sh release | cut -f1)"
       
@@ -142,9 +151,9 @@ jobs:
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
-          body_path: outputs/build_summary.md
+          tag_name: ${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}
+          name: ${{ env.KICAD_PROJECT_NAME }} Build ${{ github.run_number }}
+          body_path: ${{ env.OUTPUT_DIR }}/build_summary.md
           files: release/*
           fail_on_unmatched_files: false
         env:
@@ -169,13 +178,13 @@ jobs:
           echo "  DRC: ${{ steps.kicad-export.outputs.drc_status || '未运行' }} (违规: ${{ steps.kicad-export.outputs.drc_violations || 0 }})"
           echo ""
           echo "[生成文件]"
-          ls -lh outputs/ 2>/dev/null | grep -E '\.(pdf|csv|zip|svg|step)$' | awk '{print "  -", $9, "(" $5 ")"}' || echo "  无输出文件"
+          ls -lh ${{ env.OUTPUT_DIR }}/ 2>/dev/null | grep -E '\.(pdf|csv|zip|svg|step)$' | awk '{print "  -", $9, "(" $5 ")"}' || echo "  无输出文件"
           echo ""
           
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "[Release]"
-            echo "  标签: build-${{ github.run_number }}"
-            echo "  URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
+            echo "  标签: ${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}"
+            echo "  URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}"
           fi
           
           echo ""
