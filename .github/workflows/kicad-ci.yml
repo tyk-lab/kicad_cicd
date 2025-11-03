@@ -2,13 +2,54 @@
 # 功能：ERC/DRC检查、导出原理图PDF、BOM、Gerber文件和PCB图像
 name: KiCad CI/CD
 
-# 触发条件：推送到主分支或手动触发
+# 触发条件：智能触发策略
 on:
+  # 推送到主分支（只监控 KiCad 相关文件变更）
   push:
     branches:
       - main
       - master
+    paths:
+      - '**.kicad_pro'
+      - '**.kicad_sch'
+      - '**.kicad_pcb'
+      - 'scripts/**'
+      - '.github/workflows/kicad-ci.yml'
+    # 排除文档和配置文件
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  
+  # Pull Request：只运行检查，不发布
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - '**.kicad_pro'
+      - '**.kicad_sch'
+      - '**.kicad_pcb'
+      - 'scripts/**'
+  
+  # 手动触发：完整控制
   workflow_dispatch:
+    inputs:
+      skip_checks:
+        description: '跳过 ERC/DRC 检查'
+        required: false
+        type: boolean
+        default: false
+      skip_exports:
+        description: '跳过文件导出'
+        required: false
+        type: boolean
+        default: false
+      create_release:
+        description: '创建 Release'
+        required: false
+        type: boolean
+        default: true
 
 # 设置GitHub Token权限
 permissions:
@@ -93,8 +134,28 @@ jobs:
           # 确保脚本可执行
           chmod +x scripts/kicad_export.py
           
+          # 构建参数
+          SKIP_CHECKS=""
+          SKIP_EXPORTS=""
+          
+          # PR 模式：只检查，不导出
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SKIP_EXPORTS="--skip-exports"
+            echo "📋 PR 模式：只运行质量检查"
+          fi
+          
+          # 手动触发：根据输入决定
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.skip_checks }}" = "true" ]; then
+              SKIP_CHECKS="--skip-checks"
+            fi
+            if [ "${{ inputs.skip_exports }}" = "true" ]; then
+              SKIP_EXPORTS="--skip-exports"
+            fi
+          fi
+          
           # 运行导出脚本
-          python3 scripts/kicad_export.py ${{ env.KICAD_PROJECT_NAME }}.kicad_pro -o ${{ env.OUTPUT_DIR }}
+          python3 scripts/kicad_export.py ${{ env.KICAD_PROJECT_NAME }}.kicad_pro -o ${{ env.OUTPUT_DIR }} $SKIP_CHECKS $SKIP_EXPORTS
           
           exit_code=$?
           
@@ -119,13 +180,16 @@ jobs:
       
       # 步骤6：上传构建产物到GitHub Artifacts
       - name: Upload artifacts
+        if: always()  # 即使检查失败也上传报告
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KICAD_PROJECT_NAME }}-outputs
+          name: ${{ env.KICAD_PROJECT_NAME }}-outputs-${{ github.run_number }}
           path: ${{ env.OUTPUT_DIR }}/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}  # PR保留7天，主分支30天
       
-      # 步骤7：更新README构建状态
+      # 步骤7：更新README构建状态（仅主分支推送时）
       - name: Update README with build status
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         run: |
           # 运行README更新脚本
           python3 scripts/update_readme.py \
@@ -145,8 +209,11 @@ jobs:
             git push
           fi
       
-      # 步骤8：准备Release文件
+      # 步骤8：准备Release文件（仅主分支推送或手动创建时）
       - name: Prepare release files
+        if: |
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
         run: |
           mkdir -p release
           
@@ -167,9 +234,11 @@ jobs:
           
           echo "Release包大小: $(du -sh release | cut -f1)"
       
-      # 步骤9：创建GitHub Release
+      # 步骤9：创建GitHub Release（可选）
       - name: Create Release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: |
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}
@@ -179,34 +248,4 @@ jobs:
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 步骤10：显示构建结果摘要
-      - name: Display Build Results
-        if: always()
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "  KiCad CI/CD 构建结果"
-          echo "=========================================="
-          echo ""
-          echo "[构建信息]"
-          echo "  Build #: ${{ github.run_number }}"
-          echo "  Commit: ${{ github.sha }}"
-          echo "  Branch: ${{ github.ref_name }}"
-          echo ""
-          echo "[质量检查]"
-          echo "  ERC: ${{ steps.kicad-export.outputs.erc_status || '未运行' }} (违规: ${{ steps.kicad-export.outputs.erc_violations || 0 }})"
-          echo "  DRC: ${{ steps.kicad-export.outputs.drc_status || '未运行' }} (违规: ${{ steps.kicad-export.outputs.drc_violations || 0 }})"
-          echo ""
-          echo "[生成文件]"
-          ls -lh ${{ env.OUTPUT_DIR }}/ 2>/dev/null | grep -E '\.(pdf|csv|zip|svg|step)$' | awk '{print "  -", $9, "(" $5 ")"}' || echo "  无输出文件"
-          echo ""
-          
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "[Release]"
-            echo "  标签: ${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}"
-            echo "  URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.KICAD_PROJECT_NAME }}-build-${{ github.run_number }}"
-          fi
-          
-          echo ""
-          echo "=========================================="
+   

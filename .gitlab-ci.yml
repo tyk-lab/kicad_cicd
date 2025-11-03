@@ -1,0 +1,307 @@
+# KiCad项目自动化构建工作流 (GitLab CI/CD)
+# 功能：ERC/DRC检查、导出原理图PDF、BOM、Gerber文件和PCB图像
+
+# 全局变量配置
+variables:
+  KICAD_PROJECT_NAME: "229_Test"  # KiCad项目名称（不含扩展名）
+  OUTPUT_DIR: "outputs"            # 输出目录
+  GIT_DEPTH: 1                     # 浅克隆加速
+  DEBIAN_FRONTEND: noninteractive
+
+# 智能触发规则：只在KiCad文件变更时触发
+workflow:
+  rules:
+    # 主分支推送：KiCad文件变更
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - "*.kicad_pro"
+        - "*.kicad_sch"
+        - "*.kicad_pcb"
+        - "scripts/**/*"
+        - ".gitlab-ci.yml"
+      when: always
+    # Merge Request：只运行检查
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - "*.kicad_pro"
+        - "*.kicad_sch"
+        - "*.kicad_pcb"
+        - "scripts/**/*"
+      variables:
+        SKIP_EXPORTS: "true"  # MR只检查不导出
+        SKIP_RELEASE: "true"  # MR不创建Release
+      when: always
+    # 手动触发：完整控制
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: always
+    # 其他情况：不触发
+    - when: never
+
+# 定义流水线阶段
+stages:
+  - setup      # 安装KiCad
+  - build      # 运行导出脚本
+  - package    # 打包产物
+  - release    # 发布Release
+
+# 默认设置
+default:
+  image: ubuntu:22.04
+  cache:
+    key: kicad-installation
+    paths:
+      - .kicad-cache/
+
+# ==================== 阶段1：安装KiCad ====================
+install-kicad:
+  stage: setup
+  script:
+    - echo "检查KiCad安装状态..."
+    
+    # 检查缓存
+    - |
+      if [ -f ".kicad-cache/installed" ]; then
+        echo "✓ 发现KiCad缓存"
+        if command -v kicad.kicad-cli &> /dev/null; then
+          echo "✓ KiCad已安装 (snap版本)"
+          kicad.kicad-cli version
+          exit 0
+        elif command -v kicad-cli &> /dev/null; then
+          echo "✓ KiCad已安装"
+          kicad-cli version
+          exit 0
+        fi
+      fi
+    
+    # 安装KiCad
+    - echo "安装KiCad via snap..."
+    - apt-get update -qq
+    - apt-get install -y -qq snapd
+    - systemctl start snapd || true
+    - snap install kicad || echo "Snap安装失败，尝试APT..."
+    
+    # 检测安装结果
+    - |
+      if command -v kicad.kicad-cli &> /dev/null; then
+        echo "✓ 安装成功: kicad.kicad-cli"
+        kicad.kicad-cli version
+        ln -sf /snap/bin/kicad.kicad-cli /usr/bin/kicad-cli
+      elif [ -f "/snap/bin/kicad-cli" ]; then
+        echo "✓ 安装成功: kicad-cli"
+        /snap/bin/kicad-cli version
+        ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli
+      else
+        echo "⚠ Snap CLI不可用，尝试APT安装..."
+        apt-get install -y software-properties-common
+        add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+        apt-get update
+        apt-get install -y kicad
+        
+        if ! command -v kicad-cli &> /dev/null; then
+          echo "✗ KiCad安装失败"
+          exit 1
+        fi
+        kicad-cli version
+      fi
+    
+    # 标记缓存
+    - mkdir -p .kicad-cache
+    - touch .kicad-cache/installed
+    - echo "✓ KiCad安装完成"
+  
+  cache:
+    key: kicad-installation
+    paths:
+      - .kicad-cache/
+    policy: push
+
+# ==================== 阶段2：运行构建 ====================
+kicad-export:
+  stage: build
+  dependencies:
+    - install-kicad
+  script:
+    # 恢复KiCad命令（如果来自snap）
+    - |
+      if [ -f "/snap/bin/kicad.kicad-cli" ]; then
+        ln -sf /snap/bin/kicad.kicad-cli /usr/bin/kicad-cli
+      elif [ -f "/snap/bin/kicad-cli" ]; then
+        ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli
+      fi
+    
+    # 安装Python（如果未安装）
+    - apt-get update -qq && apt-get install -y -qq python3
+    
+    # 运行导出脚本
+    - chmod +x scripts/kicad_export.py
+    
+    # 构建参数（根据触发类型决定）
+    - |
+      SKIP_CHECKS=""
+      SKIP_EXPORTS_ARG=""
+      
+      # MR 模式：只检查，不导出
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        SKIP_EXPORTS_ARG="--skip-exports"
+        echo "📋 MR 模式：只运行质量检查"
+      fi
+      
+      # 使用环境变量控制（手动触发时可设置）
+      if [ "$SKIP_EXPORTS" = "true" ]; then
+        SKIP_EXPORTS_ARG="--skip-exports"
+      fi
+      
+      python3 scripts/kicad_export.py ${KICAD_PROJECT_NAME}.kicad_pro -o ${OUTPUT_DIR} $SKIP_CHECKS $SKIP_EXPORTS_ARG
+    
+    # 提取结果信息
+    - |
+      if [ -f "${OUTPUT_DIR}/erc_report.json" ]; then
+        ERC_VIOLATIONS=$(python3 -c "import json; data=json.load(open('${OUTPUT_DIR}/erc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
+        echo "ERC违规数: ${ERC_VIOLATIONS}"
+      fi
+      
+      if [ -f "${OUTPUT_DIR}/drc_report.json" ]; then
+        DRC_VIOLATIONS=$(python3 -c "import json; data=json.load(open('${OUTPUT_DIR}/drc_report.json')); print(len(data.get('violations', [])))" 2>/dev/null || echo "unknown")
+        echo "DRC违规数: ${DRC_VIOLATIONS}"
+      fi
+  
+  artifacts:
+    name: "${KICAD_PROJECT_NAME}-outputs-$CI_PIPELINE_ID"
+    paths:
+      - ${OUTPUT_DIR}/
+    expire_in: 7 days  # MR保留7天
+    when: always  # 即使失败也上传报告
+    reports:
+      dotenv: build.env
+  
+  allow_failure: false
+  
+  rules:
+    # MR：短期保留
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      artifacts:
+        expire_in: 7 days
+    # 主分支：长期保留
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      artifacts:
+        expire_in: 30 days
+
+# ==================== 阶段3：更新README ====================
+update-readme:
+  stage: package
+  dependencies:
+    - kicad-export
+  rules:
+    # 只在主分支推送时更新README
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: always
+    - when: never
+  script:
+    # 安装Python（如果未安装）
+    - apt-get update -qq && apt-get install -y -qq python3 git
+    
+    # 运行README更新脚本
+    - |
+      python3 scripts/update_readme.py \
+        -o ${OUTPUT_DIR} \
+        -r README.md \
+        -b ${CI_PIPELINE_ID}
+    
+    # 提交更新
+    - |
+      git config user.name "GitLab CI"
+      git config user.email "ci@gitlab.com"
+      
+      if git diff --quiet README.md; then
+        echo "README 无变化"
+      else
+        echo "README 已更新"
+        git add README.md
+        git commit -m "docs: 更新构建状态 #${CI_PIPELINE_ID} [skip ci]"
+        git push https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git HEAD:${CI_COMMIT_REF_NAME}
+      fi
+  
+  allow_failure: true
+
+# ==================== 阶段3：打包Release ====================
+prepare-release:
+  stage: package
+  dependencies:
+    - kicad-export
+  rules:
+    # 只在主分支或手动触发时打包
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $SKIP_RELEASE != "true"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "web" && $SKIP_RELEASE != "true"'
+      when: always
+    - when: never
+  script:
+    - mkdir -p release
+    
+    # 复制关键输出文件
+    - |
+      for file in \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-Schematic.pdf \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-BOM.csv \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-Gerber.zip \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-PCB-Front.svg \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-PCB-Back.svg \
+        ${OUTPUT_DIR}/${KICAD_PROJECT_NAME}-3D.step; do
+        [ -f "$file" ] && cp "$file" release/ && echo "✓ $(basename $file)"
+      done
+    
+    # 复制报告和摘要
+    - |
+      [ -f "${OUTPUT_DIR}/erc_report.json" ] && cp ${OUTPUT_DIR}/erc_report.json release/
+      [ -f "${OUTPUT_DIR}/drc_report.json" ] && cp ${OUTPUT_DIR}/drc_report.json release/
+      [ -f "${OUTPUT_DIR}/build_summary.md" ] && cp ${OUTPUT_DIR}/build_summary.md release/
+    
+    # 显示Release包信息
+    - echo "Release包内容:"
+    - ls -lh release/
+    - du -sh release/
+  
+  artifacts:
+    name: "${KICAD_PROJECT_NAME}-release-$CI_PIPELINE_ID"
+    paths:
+      - release/
+    expire_in: 90 days
+
+# ==================== 阶段4：创建GitLab Release ====================
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  dependencies:
+    - prepare-release
+  rules:
+    # 只在主分支推送时自动创建Release
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $SKIP_RELEASE != "true"'
+      when: always
+    - when: never
+  script:
+    - echo "创建GitLab Release..."
+  
+  release:
+    tag_name: "${KICAD_PROJECT_NAME}-build-${CI_PIPELINE_ID}"
+    name: "${KICAD_PROJECT_NAME} Build ${CI_PIPELINE_ID}"
+    description: "${OUTPUT_DIR}/build_summary.md"
+    assets:
+      links:
+        - name: "Schematic PDF"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/release/${KICAD_PROJECT_NAME}-Schematic.pdf"
+          link_type: other
+        - name: "BOM (CSV)"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/release/${KICAD_PROJECT_NAME}-BOM.csv"
+          link_type: other
+        - name: "Gerber Files (ZIP)"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/release/${KICAD_PROJECT_NAME}-Gerber.zip"
+          link_type: package
+        - name: "Build Summary"
+          url: "${CI_PROJECT_URL}/-/jobs/${CI_JOB_ID}/artifacts/file/release/build_summary.md"
+          link_type: other
+  
+  only:
+    - main
+    - master
+    - tags
+

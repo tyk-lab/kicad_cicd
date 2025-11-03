@@ -19,16 +19,34 @@
 - **KiCad版本**: 7.0+
 - **PCB层数**: 2层
 
-## 自动化构建
+## 🚀 自动化构建
 
-每次推送到主分支时，GitHub Actions会自动执行以下操作：
+每次推送到主分支时，CI/CD 会自动执行以下操作：
 
-- ✅ **ERC检查** - 电气规则检查
-- ✅ **DRC检查** - 设计规则检查
-- ✅ **原理图导出** - 生成PDF文档
-- ✅ **BOM导出** - 元件清单
-- ✅ **Gerber生成** - 制造文件
-- ✅ **PCB图像** - 可视化预览
+### 质量检查
+- ✅ **ERC检查** - 电气规则检查（区分错误/警告）
+- ✅ **DRC检查** - 设计规则检查（区分错误/警告）
+- ✅ **智能判断** - 只有错误才会导致构建失败
+
+### 文件导出
+- ✅ **原理图PDF** - 完整电路图文档
+- ✅ **BOM清单** - CSV格式物料清单
+- ✅ **Gerber文件** - 生产制造文件包
+- ✅ **PCB图像** - SVG格式正反面预览
+- ✅ **3D模型** - STEP格式（可选）
+
+### 自动发布
+- 📦 **构建产物** - 自动上传到 Artifacts
+- 🏷️ **版本发布** - 自动创建 GitHub Release
+- 📊 **状态同步** - 自动更新 README 徽章
+
+## 🔧 技术特点
+
+- **快速启动** - KiCad 缓存机制，30秒启动
+- **智能检查** - 区分错误和警告，精准判断构建状态
+- **自动清理** - 失败文件自动删除，避免误导
+- **实时状态** - README 徽章实时显示构建结果
+- **双平台支持** - GitHub Actions + GitLab CI/CD
 
 ## 最新构建输出
 
@@ -84,14 +102,49 @@ cd YOUR_REPO
 3. 点击 "Run workflow" 按钮
 4. 选择分支并点击 "Run workflow"
 
-## 检查报告
+## 📋 检查报告
 
-每次构建都会生成ERC和DRC检查报告，可以在以下位置查看：
+每次构建都会生成详细的检查报告：
 
-- ERC报告: `erc_report.json`
-- DRC报告: `drc_report.json`
+### 报告文件
+- 📄 **ERC报告**: `outputs/erc_report.json` - 电气规则检查详情
+- 📄 **DRC报告**: `outputs/drc_report.json` - 设计规则检查详情
+- 📄 **构建摘要**: `outputs/build_summary.md` - 完整构建报告
 
-这些报告也会作为artifacts上传到GitHub Actions，并包含在Release中。
+### 查看方式
+1. **Artifacts** - GitHub Actions 页面下载完整输出
+2. **Release** - 每次发布包含所有报告文件
+3. **README** - 顶部徽章显示实时状态
+
+### 状态说明
+- 🟢 **通过** - 无错误无警告
+- 🟡 **警告** - 有警告但无错误（构建成功）
+- 🔴 **失败** - 有错误（构建失败）
+
+## 🛠️ 本地使用工具
+
+### 快速开始
+```bash
+# 运行完整导出
+python3 scripts/kicad_export.py 229_Test.kicad_pro
+
+# 只运行检查
+python3 scripts/kicad_export.py 229_Test.kicad_pro --skip-exports
+
+# 指定输出目录
+python3 scripts/kicad_export.py 229_Test.kicad_pro -o build
+```
+
+### 更多选项
+查看 `scripts/README.md` 了解完整功能和用法。
+
+## 📚 文档
+
+- 📖 [工具使用指南](scripts/README.md) - Python脚本详细说明
+- ⚡ [CI/CD触发策略](docs/CI-CD-Trigger-Strategy.md) - 触发时机和执行策略详解 ⭐
+- 🔀 [CI/CD平台对比](docs/CI-CD-Comparison.md) - GitHub vs GitLab
+- 🔄 [README自动更新](docs/README-Auto-Update.md) - 状态徽章配置
+- 📋 [完整系统概述](docs/SUMMARY.md) - 系统架构和技术实现
 
 ## 许可证
 
