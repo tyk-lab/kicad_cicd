@@ -437,10 +437,17 @@ class KiCadExporter:
             else:
                 print("ℹ 3D STEP模型导出跳过 (元件可能缺少3D模型)")
                 self.results["exports"]["step_3d"] = False
+                # 删除可能生成的不完整文件
+                if step_file.exists():
+                    step_file.unlink()
+                    print(f"  已清理不完整的STEP文件")
 
         except Exception as e:
             print(f"ℹ 3D STEP模型导出跳过 ({str(e)})")
             self.results["exports"]["step_3d"] = False
+            # 删除可能生成的不完整文件
+            if step_file.exists():
+                step_file.unlink()
 
         # 3D导出失败不影响整体成功状态
         return all_success
