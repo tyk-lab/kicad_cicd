@@ -14,7 +14,9 @@ from typing import Tuple, Dict, Any
 
 
 class KiCadExporter:
-    def __init__(self, project_path: str, output_dir: str = "outputs"):
+    def __init__(
+        self, project_path: str, output_dir: str = "outputs", custom_3d_path: str = None
+    ):
         self.project_path = Path(project_path)
         self.project_name = self.project_path.stem
         self.output_dir = Path(output_dir)
@@ -311,7 +313,7 @@ class KiCadExporter:
         self.results["exports"]["pcb_back_svg"] = back_svg.exists()
         all_success = all_success and success
 
-        # 导出3D STEP模型（可选）
+        # 导出3D STEP模型（可选，失败不影响整体结果）
         step_file = self.output_dir / f"{self.project_name}-3D.step"
         args_step = [
             self.kicad_cli,
@@ -323,12 +325,33 @@ class KiCadExporter:
             str(self.pcb_file),
         ]
 
-        success, _ = self._run_command(args_step, "导出3D STEP模型")
-        self.results["exports"]["step_3d"] = step_file.exists()
+        print(f"\n{'='*60}")
+        print("执行: 导出3D STEP模型 (可选)")
+        print(f"命令: {' '.join(args_step)}")
+        print("=" * 60)
 
-        if not step_file.exists():
-            print("  ℹ 3D模型导出失败（可能缺少3D模型库）")
+        try:
+            # 抑制wxWidgets调试输出
+            result = subprocess.run(
+                args_step,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "KICAD_SKIP_ERRORS": "1"},
+            )
 
+            if result.returncode == 0 and step_file.exists():
+                print("✓ 导出3D STEP模型 - 成功")
+                self.results["exports"]["step_3d"] = True
+            else:
+                print("ℹ 3D STEP模型导出跳过 (元件可能缺少3D模型)")
+                self.results["exports"]["step_3d"] = False
+
+        except Exception as e:
+            print(f"ℹ 3D STEP模型导出跳过 ({str(e)})")
+            self.results["exports"]["step_3d"] = False
+
+        # 3D导出失败不影响整体成功状态
         return all_success
 
     def generate_summary(self) -> str:
@@ -350,17 +373,22 @@ class KiCadExporter:
 """
 
         exports = [
-            ("schematic_pdf", "Schematic PDF"),
-            ("bom", "BOM (Bill of Materials)"),
-            ("gerber_zip", "Gerber files (ZIP)"),
-            ("pcb_front_svg", "PCB Front Image (SVG)"),
-            ("pcb_back_svg", "PCB Back Image (SVG)"),
-            ("step_3d", "3D STEP Model"),
+            ("schematic_pdf", "Schematic PDF", True),
+            ("bom", "BOM (Bill of Materials)", True),
+            ("gerber_zip", "Gerber files (ZIP)", True),
+            ("pcb_front_svg", "PCB Front Image (SVG)", True),
+            ("pcb_back_svg", "PCB Back Image (SVG)", True),
+            ("step_3d", "3D STEP Model", False),  # 可选
         ]
 
-        for key, name in exports:
-            status = "✓" if self.results["exports"].get(key, False) else "✗"
-            summary += f"- {status} {name}\n"
+        for key, name, required in exports:
+            exported = self.results["exports"].get(key, False)
+            if exported:
+                summary += f"- ✓ {name}\n"
+            elif required:
+                summary += f"- ✗ {name}\n"
+            else:
+                summary += f"- ℹ {name} (可选，已跳过)\n"
 
         return summary
 
