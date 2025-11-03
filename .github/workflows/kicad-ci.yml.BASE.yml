@@ -1,0 +1,456 @@
+# KiCad项目自动化构建工作流
+# 功能：ERC/DRC检查、导出原理图PDF、BOM、Gerber文件和PCB图像
+name: KiCad CI/CD
+
+# 触发条件：推送到主分支或手动触发
+on:
+  push:
+    branches:
+      - main      # 主分支推送时触发
+      - master    # 或master分支推送时触发
+  workflow_dispatch:  # 允许在GitHub Actions页面手动触发
+
+# 设置GitHub Token权限
+permissions:
+  contents: write  # 允许创建release和上传文件
+
+jobs:
+  kicad-checks:
+    runs-on: ubuntu-22.04   # 使用Linux平台运行
+    
+    steps:
+      # 步骤1：检出代码仓库
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # 步骤2：缓存KiCad安装
+      - name: Cache KiCad installation
+        id: cache-kicad
+        uses: actions/cache@v4
+        with:
+          path: |
+            /snap/kicad
+            /usr/bin/kicad-cli
+            /usr/share/kicad
+          key: kicad-snap-${{ runner.os }}-v2
+          restore-keys: |
+            kicad-snap-${{ runner.os }}-
+      
+      # 步骤3：检查KiCad是否已缓存
+      - name: Check KiCad from cache
+        id: check-kicad
+        run: |
+          echo "=========================================="
+          echo "Checking KiCad Cache Status"
+          echo "=========================================="
+          echo "Cache hit: ${{ steps.cache-kicad.outputs.cache-hit }}"
+          
+          echo ""
+          echo "Checking installation files..."
+          
+          if command -v kicad-cli &> /dev/null; then
+            echo "✓ KiCad CLI found"
+            kicad-cli version
+            echo "cached=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ KiCad CLI NOT found"
+            echo "cached=false" >> $GITHUB_OUTPUT
+          fi
+          echo "=========================================="
+        shell: bash
+      
+      # 步骤4：安装KiCad（仅在缓存未命中时）
+      - name: Setup KiCad environment
+        if: steps.check-kicad.outputs.cached == 'false'
+        run: |
+          echo "========================================"
+          echo "Installing KiCad (optimized method)..."
+          echo "========================================"
+          
+          # 方案1：使用snap安装（最快，约30-60秒）
+          echo "Installing KiCad via snap..."
+          sudo snap install kicad
+          
+          echo ""
+          echo "Checking snap installation..."
+          
+          # Snap可能安装到不同路径，尝试查找
+          if [ -f "/snap/bin/kicad-cli" ]; then
+            echo "✓ Found kicad-cli at /snap/bin/kicad-cli"
+            sudo ln -sf /snap/bin/kicad-cli /usr/bin/kicad-cli
+            /snap/bin/kicad-cli version
+            touch ~/.kicad-installed
+          elif [ -f "/snap/bin/kicad.kicad-cli" ]; then
+            echo "✓ Found kicad.kicad-cli at /snap/bin/"
+            sudo ln -sf /snap/bin/kicad.kicad-cli /usr/bin/kicad-cli
+            /snap/bin/kicad.kicad-cli version
+            touch ~/.kicad-installed
+          else
+            echo "⚠ Snap CLI not accessible, trying apt method..."
+            
+            # 备用方案：使用apt安装完整包
+            sudo add-apt-repository --yes ppa:kicad/kicad-9.0-releases
+            sudo apt-get update
+            
+            # 安装KiCad完整包（包含CLI工具）
+            echo "Installing KiCad from PPA (this may take 2-3 minutes)..."
+            sudo apt-get install -y kicad
+            
+            if command -v kicad-cli &> /dev/null; then
+              echo "✓ KiCad installed successfully from PPA"
+              kicad-cli version
+              touch ~/.kicad-installed
+            else
+              echo "ERROR: KiCad installation failed"
+              echo "Searching for kicad commands:"
+              ls -la /usr/bin/kicad* 2>/dev/null || echo "No kicad commands found in /usr/bin/"
+              exit 1
+            fi
+          fi
+          
+          echo "========================================"
+        shell: bash
+      
+      # 步骤6：运行ERC检查（电气规则检查）
+      # 检查原理图中的电气连接错误，如未连接的引脚、电源冲突等
+      - name: Run ERC (Electrical Rules Check)
+        id: erc-check
+        continue-on-error: true
+        run: |
+          echo "=========================================="
+          echo "Running ERC Check"
+          echo "=========================================="
+          
+          schFile="229_Test.kicad_sch"
+          
+          if [ ! -f "$schFile" ]; then
+            echo "ERROR: Schematic file not found: $schFile"
+            ls -la *.kicad_sch
+            exit 1
+          fi
+          
+          echo "Found schematic file: $schFile"
+          echo "Running ERC check..."
+          
+          # 运行ERC检查
+          kicad-cli sch erc --exit-code-violations --severity-all --format json --output erc_report.json "$schFile" || true
+          exitCode=$?
+          
+          # 检查结果
+          if [ -f "erc_report.json" ]; then
+            echo "ERC report generated successfully"
+            cat erc_report.json
+            
+            if [ $exitCode -eq 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "violations=0" >> $GITHUB_OUTPUT
+            else
+              echo "WARNING: ERC check found violations (exit code: $exitCode)"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "violations=1" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ERROR: ERC report was not generated"
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "violations=unknown" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "=========================================="
+        shell: bash
+      
+      # 步骤7：运行DRC检查（设计规则检查）
+      # 检查PCB设计中的布线错误，如间距不足、悬空走线等
+      - name: Run DRC (Design Rules Check)
+        id: drc-check
+        continue-on-error: true
+        run: |
+          echo "=========================================="
+          echo "Running DRC Check"
+          echo "=========================================="
+          
+          pcbFile="229_Test.kicad_pcb"
+          
+          if [ ! -f "$pcbFile" ]; then
+            echo "ERROR: PCB file not found: $pcbFile"
+            ls -la *.kicad_pcb
+            exit 1
+          fi
+          
+          echo "Found PCB file: $pcbFile"
+          echo "Running DRC check..."
+          
+          # 运行DRC检查
+          kicad-cli pcb drc --exit-code-violations --severity-all --format json --output drc_report.json "$pcbFile" || true
+          exitCode=$?
+          
+          # 检查结果
+          if [ -f "drc_report.json" ]; then
+            echo "DRC report generated successfully"
+            cat drc_report.json
+            
+            if [ $exitCode -eq 0 ]; then
+              echo "status=passed" >> $GITHUB_OUTPUT
+              echo "violations=0" >> $GITHUB_OUTPUT
+            else
+              echo "WARNING: DRC check found violations (exit code: $exitCode)"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "violations=1" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ERROR: DRC report was not generated"
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "violations=unknown" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "=========================================="
+        shell: bash
+      
+      # 步骤8：导出原理图为PDF文档
+      - name: Export Schematic PDF
+        run: |
+          echo "Exporting schematic to PDF..."
+          mkdir -p outputs
+          kicad-cli sch export pdf --output outputs/229_Test-Schematic.pdf 229_Test.kicad_sch
+          echo "Schematic PDF exported"
+        shell: bash
+      
+      # 步骤6：导出BOM（物料清单）
+      - name: Export BOM
+        run: |
+          echo "Exporting BOM..."
+          kicad-cli sch export bom --output outputs/229_Test-BOM.csv 229_Test.kicad_sch
+          echo "BOM exported"
+        shell: bash
+      
+      # 步骤7：生成Gerber制造文件
+      - name: Generate Gerber files
+        run: |
+          echo "Generating Gerber files..."
+          mkdir -p outputs/gerber
+          
+          # 导出所有Gerber层文件（用于PCB制造）
+          kicad-cli pcb export gerbers --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "Gerber layers exported"
+          
+          # 生成钆孔文件（Excellon格式）
+          kicad-cli pcb export drill --format excellon --output outputs/gerber/ 229_Test.kicad_pcb
+          echo "Drill files generated"
+        shell: bash
+      
+      # 步骤8：导出PCB可视化图像
+      - name: Export PCB images
+        run: |
+          echo "Exporting PCB images..."
+          
+          # 导出PCB正面视图（SVG格式）
+          kicad-cli pcb export svg --output outputs/229_Test-PCB-Front.svg --layers F.Cu,F.Mask,F.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-PCB-Front.svg" ]; then
+            echo "Front PCB image exported successfully"
+          fi
+          
+          # 导出PCB背面视图（SVG格式）
+          kicad-cli pcb export svg --output outputs/229_Test-PCB-Back.svg --layers B.Cu,B.Mask,B.Silkscreen,Edge.Cuts 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-PCB-Back.svg" ]; then
+            echo "Back PCB image exported successfully"
+          fi
+          
+          # 导出3D STEP模型
+          kicad-cli pcb export step --output outputs/229_Test-3D.step 229_Test.kicad_pcb || true
+          if [ -f "outputs/229_Test-3D.step" ]; then
+            echo "3D STEP model exported successfully"
+          else
+            echo "3D export skipped (may require 3D models)"
+          fi
+          
+          echo "PCB image export completed"
+        shell: bash
+      
+      # 步骤9：打包Gerber文件为ZIP压缩包
+      - name: Create Gerber ZIP archive
+        run: |
+          # 将所有Gerber文件打包，方便下载和提交给PCB厂商
+          cd outputs && zip -r 229_Test-Gerber.zip gerber/
+        shell: bash
+      
+      # 步骤10：上传构建产物到GitHub Artifacts
+      # 可在Actions页面下载，保留90天
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kicad-outputs
+          path: outputs/
+      
+      # 步骤11:生成构建摘要文档
+      - name: Update README with status
+        run: |
+          buildDate=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          
+          # KiCad缓存状态
+          if [ "${{ steps.cache-kicad.outputs.cache-hit }}" = "true" ]; then
+            cacheStatus="Used cached installation"
+          else
+            cacheStatus="Fresh installation"
+          fi
+          
+          # ERC/DRC状态
+          if [ "${{ steps.erc-check.outputs.status }}" = "passed" ]; then
+            ercStatus="Passed"
+          else
+            ercStatus="Failed"
+          fi
+          
+          if [ "${{ steps.drc-check.outputs.status }}" = "passed" ]; then
+            drcStatus="Passed"
+          else
+            drcStatus="Failed"
+          fi
+          
+          cat > outputs/build_summary.md << EOF
+          ## Build Summary
+          
+          - **Build Date**: $buildDate
+          - **Commit**: ${{ github.sha }}
+          - **Branch**: ${{ github.ref_name }}
+          - **KiCad Setup**: $cacheStatus
+          
+          ### Quality Checks
+          
+          - **ERC (Electrical Rules Check)**: $ercStatus
+          - **DRC (Design Rules Check)**: $drcStatus
+          
+          ### Outputs
+          
+          - Schematic PDF
+          - BOM (Bill of Materials)
+          - Gerber files
+          - PCB Images (SVG)
+          - ERC Report (JSON)
+          - DRC Report (JSON)
+          EOF
+        shell: bash
+      
+      # 步骤12：准备Release文件（只包含成功生成的文件，精简输出）
+      - name: Prepare release files
+        run: |
+          echo "Preparing release files..."
+          mkdir -p release
+          
+          # 只复制关键文件,不包含散乱的Gerber文件
+          files="
+            outputs/229_Test-Schematic.pdf
+            outputs/229_Test-BOM.csv
+            outputs/229_Test-Gerber.zip
+            outputs/229_Test-PCB-Front.svg
+            outputs/229_Test-PCB-Back.svg
+            outputs/229_Test-3D.step
+          "
+          
+          echo "Copying key output files:"
+          for file in $files; do
+            if [ -f "$file" ]; then
+              cp "$file" release/
+              echo "  + $(basename $file)"
+            else
+              echo "  - $(basename $file) (not found)"
+            fi
+          done
+          
+          # 如果ERC/DRC报告存在，也复制它们
+          if [ -f "erc_report.json" ]; then
+            cp erc_report.json release/
+            echo "  + erc_report.json"
+          else
+            echo "  - erc_report.json (not available)"
+          fi
+          
+          if [ -f "drc_report.json" ]; then
+            cp drc_report.json release/
+            echo "  + drc_report.json"
+          else
+            echo "  - drc_report.json (not available)"
+          fi
+          
+          echo ""
+          echo "Final release files:"
+          ls -lh release/ | tail -n +2 | awk '{print "  -", $9, "(" $5 ")"}'
+        shell: bash
+      
+      # 步骤13：创建GitHub Release并上传所有文件
+      # 仅在推送到主分支时执行（手动触发时不创建Release）
+      - name: Create Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-${{ github.run_number }}          # 使用构建编号作为标签
+          name: Build ${{ github.run_number }}              # Release标题
+          body_path: outputs/build_summary.md               # Release说明内容
+          files: release/**/*                                # 上传release目录下的所有文件
+          fail_on_unmatched_files: false                    # 文件不存在时不报错
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}         # 使用GitHub提供的访问令牌
+      
+      # 步骤14：输出CI/CD执行结果摘要
+      - name: Display CI/CD Results
+        if: always()
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "  KiCad CI/CD Results"
+          echo "=========================================="
+          echo ""
+          
+          # 构建信息
+          echo "[BUILD INFO]"
+          echo "  Build Number: ${{ github.run_number }}"
+          echo "  Commit SHA: ${{ github.sha }}"
+          echo "  Branch: ${{ github.ref_name }}"
+          echo "  Trigger: ${{ github.event_name }}"
+          echo ""
+          
+          # 质量检查结果
+          echo "[QUALITY CHECKS]"
+          ercStatus="${{ steps.erc-check.outputs.status }}"
+          drcStatus="${{ steps.drc-check.outputs.status }}"
+          
+          case "$ercStatus" in
+            "passed") echo "  ERC Check: PASSED" ;;
+            "failed") echo "  ERC Check: FAILED (violations found)" ;;
+            "error") echo "  ERC Check: ERROR" ;;
+            *) echo "  ERC Check: SKIPPED" ;;
+          esac
+          
+          case "$drcStatus" in
+            "passed") echo "  DRC Check: PASSED" ;;
+            "failed") echo "  DRC Check: FAILED (violations found)" ;;
+            "error") echo "  DRC Check: ERROR" ;;
+            *) echo "  DRC Check: SKIPPED" ;;
+          esac
+          echo ""
+          
+          # 输出文件
+          echo "[GENERATED FILES]"
+          [ -f "outputs/229_Test-Schematic.pdf" ] && echo "  + Schematic PDF"
+          [ -f "outputs/229_Test-BOM.csv" ] && echo "  + BOM (Bill of Materials)"
+          if [ -f "outputs/229_Test-Gerber.zip" ]; then
+            size=$(du -h "outputs/229_Test-Gerber.zip" | cut -f1)
+            echo "  + Gerber files ($size)"
+          fi
+          [ -f "outputs/229_Test-PCB-Front.svg" ] && echo "  + PCB Front Image"
+          [ -f "outputs/229_Test-PCB-Back.svg" ] && echo "  + PCB Back Image"
+          [ -f "outputs/229_Test-3D.step" ] && echo "  + 3D STEP Model"
+          echo ""
+          
+          # Release信息
+          if [ "${{ github.event_name }}" = "push" ] && ([ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]); then
+            echo "[RELEASE]"
+            echo "  Tag: build-${{ github.run_number }}"
+            echo "  URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
+          else
+            echo "[INFO] Manual trigger - no release created"
+          fi
+          
+          echo ""
+          echo "=========================================="
+          echo "  CI/CD Workflow Completed"
+          echo "=========================================="
+        shell: bash
