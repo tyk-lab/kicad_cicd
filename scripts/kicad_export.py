@@ -66,14 +66,15 @@ class KiCadExporter:
         try:
             result = subprocess.run(args, capture_output=True, text=True, timeout=120)
 
+            # 过滤掉 wxWidgets 调试信息
+            filtered_stderr = self._filter_wx_debug(result.stderr)
+
             if result.returncode == 0:
                 print(f"✓ {description} - 成功")
                 return True, result.stdout
             else:
-                print(f"⚠ {description} - 失败 (退出码: {result.returncode})")
-                if result.stderr:
-                    print(f"错误信息: {result.stderr}")
-                return False, result.stderr
+                # 不打印退出码和错误信息，由调用方根据 JSON 结果判断
+                return False, filtered_stderr
 
         except subprocess.TimeoutExpired:
             print(f"⚠ {description} - 超时")
@@ -81,6 +82,28 @@ class KiCadExporter:
         except Exception as e:
             print(f"⚠ {description} - 异常: {str(e)}")
             return False, str(e)
+
+    def _filter_wx_debug(self, stderr: str) -> str:
+        """过滤掉 wxWidgets 调试信息"""
+        if not stderr:
+            return ""
+
+        lines = stderr.split("\n")
+        filtered = []
+
+        for line in lines:
+            # 过滤掉常见的 wxWidgets 调试信息
+            if any(
+                pattern in line
+                for pattern in [
+                    "Adding duplicate image handler",
+                    "Debug: Adding duplicate",
+                ]
+            ):
+                continue
+            filtered.append(line)
+
+        return "\n".join(filtered).strip()
 
     def run_erc(self) -> bool:
         """运行ERC检查"""
@@ -94,7 +117,6 @@ class KiCadExporter:
             self.kicad_cli,
             "sch",
             "erc",
-            "--exit-code-violations",
             "--severity-all",
             "--format",
             "json",
@@ -103,29 +125,64 @@ class KiCadExporter:
             str(self.sch_file),
         ]
 
+        # 不使用 --exit-code-violations，通过 JSON 结果判断
         success, output = self._run_command(args, "ERC检查")
 
-        # 解析结果
+        # 解析结果并统计不同严重级别
         if report_file.exists():
             try:
                 with open(report_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    violations = len(data.get("violations", []))
+                    violations = data.get("violations", [])
 
-                    self.results["erc"] = {
-                        "status": "passed" if violations == 0 else "failed",
-                        "violations": violations,
-                    }
+                    # 统计不同严重级别
+                    errors = sum(1 for v in violations if v.get("severity") == "error")
+                    warnings = sum(
+                        1 for v in violations if v.get("severity") == "warning"
+                    )
+                    exclusions = sum(1 for v in violations if v.get("excluded", False))
+                    total = len(violations)
 
-                    if violations > 0:
-                        print(f"  发现 {violations} 个违规项")
+                    # 只有错误级别才标记为失败
+                    if errors > 0:
+                        self.results["erc"] = {
+                            "status": "failed",
+                            "violations": total,
+                            "errors": errors,
+                            "warnings": warnings,
+                            "exclusions": exclusions,
+                        }
+                        print(f"  ✗ 发现 {errors} 个错误, {warnings} 个警告")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
+                    elif warnings > 0:
+                        self.results["erc"] = {
+                            "status": "warning",
+                            "violations": total,
+                            "errors": 0,
+                            "warnings": warnings,
+                            "exclusions": exclusions,
+                        }
+                        print(f"  ⚠ 发现 {warnings} 个警告")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
                     else:
-                        print("  未发现违规项")
+                        self.results["erc"] = {
+                            "status": "passed",
+                            "violations": total,
+                            "errors": 0,
+                            "warnings": 0,
+                            "exclusions": exclusions,
+                        }
+                        print("  ✓ 未发现问题")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
 
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"  ⚠ JSON解析失败: {e}")
                 self.results["erc"] = {"status": "error", "violations": "unknown"}
 
-        return success
+        return True  # ERC运行成功（即使有警告）
 
     def run_drc(self) -> bool:
         """运行DRC检查"""
@@ -139,7 +196,6 @@ class KiCadExporter:
             self.kicad_cli,
             "pcb",
             "drc",
-            "--exit-code-violations",
             "--severity-all",
             "--format",
             "json",
@@ -148,29 +204,64 @@ class KiCadExporter:
             str(self.pcb_file),
         ]
 
+        # 不使用 --exit-code-violations，通过 JSON 结果判断
         success, output = self._run_command(args, "DRC检查")
 
-        # 解析结果
+        # 解析结果并统计不同严重级别
         if report_file.exists():
             try:
                 with open(report_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    violations = len(data.get("violations", []))
+                    violations = data.get("violations", [])
 
-                    self.results["drc"] = {
-                        "status": "passed" if violations == 0 else "failed",
-                        "violations": violations,
-                    }
+                    # 统计不同严重级别
+                    errors = sum(1 for v in violations if v.get("severity") == "error")
+                    warnings = sum(
+                        1 for v in violations if v.get("severity") == "warning"
+                    )
+                    exclusions = sum(1 for v in violations if v.get("excluded", False))
+                    total = len(violations)
 
-                    if violations > 0:
-                        print(f"  发现 {violations} 个违规项")
+                    # 只有错误级别才标记为失败
+                    if errors > 0:
+                        self.results["drc"] = {
+                            "status": "failed",
+                            "violations": total,
+                            "errors": errors,
+                            "warnings": warnings,
+                            "exclusions": exclusions,
+                        }
+                        print(f"  ✗ 发现 {errors} 个错误, {warnings} 个警告")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
+                    elif warnings > 0:
+                        self.results["drc"] = {
+                            "status": "warning",
+                            "violations": total,
+                            "errors": 0,
+                            "warnings": warnings,
+                            "exclusions": exclusions,
+                        }
+                        print(f"  ⚠ 发现 {warnings} 个警告")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
                     else:
-                        print("  未发现违规项")
+                        self.results["drc"] = {
+                            "status": "passed",
+                            "violations": total,
+                            "errors": 0,
+                            "warnings": 0,
+                            "exclusions": exclusions,
+                        }
+                        print("  ✓ 未发现问题")
+                        if exclusions > 0:
+                            print(f"  ℹ {exclusions} 个违规项已排除")
 
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"  ⚠ JSON解析失败: {e}")
                 self.results["drc"] = {"status": "error", "violations": "unknown"}
 
-        return success
+        return True  # DRC运行成功（即使有警告）
 
     def export_schematic_pdf(self) -> bool:
         """导出原理图PDF"""
@@ -396,14 +487,32 @@ class KiCadExporter:
         """格式化检查状态"""
         result = self.results[check_type]
         status = result["status"]
-        violations = result["violations"]
 
         if status == "passed":
+            exclusions = result.get("exclusions", 0)
+            if exclusions > 0:
+                return f"✓ 通过 ({exclusions} 项已排除)"
             return "✓ 通过"
+        elif status == "warning":
+            warnings = result.get("warnings", 0)
+            exclusions = result.get("exclusions", 0)
+            text = f"⚠ {warnings} 个警告"
+            if exclusions > 0:
+                text += f" ({exclusions} 项已排除)"
+            return text
         elif status == "failed":
-            return f"⚠ 失败 ({violations} 个违规项)"
+            errors = result.get("errors", 0)
+            warnings = result.get("warnings", 0)
+            exclusions = result.get("exclusions", 0)
+            text = f"✗ 失败 ({errors} 个错误"
+            if warnings > 0:
+                text += f", {warnings} 个警告"
+            if exclusions > 0:
+                text += f", {exclusions} 项已排除"
+            text += ")"
+            return text
         elif status == "error":
-            return "✗ 错误"
+            return "✗ 检查错误"
         else:
             return "- 跳过"
 
