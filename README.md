@@ -7,7 +7,7 @@
 <!-- BUILD_STATUS_START -->
 ## 📊 最新构建状态
 
-**构建 #27** | **状态: ✗ 失败** | **时间: 2025-11-03 17:07:39 北京时间**
+**构建 #28** | **状态: ✗ 失败** | **时间: 2025-11-06 23:23:51 北京时间**
 
 ![ERC](https://img.shields.io/badge/ERC-✓_通过-success) ![DRC](https://img.shields.io/badge/DRC-✗_12_错误-critical)
 
